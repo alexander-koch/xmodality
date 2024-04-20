@@ -4,6 +4,7 @@ import numpy as np
 import optax
 from einops import rearrange
 from unet import UNet
+from dit import DiT
 import math
 import argparse
 
@@ -103,7 +104,8 @@ class TrainingState(NamedTuple):
     key: jax.Array
 
 def main(args):
-    module = UNet(128, channels=1)
+    #module = UNet(128, channels=1)
+    module = DiT(patch_size=8, in_channels=1, dtype=jnp.bfloat16)
     opt = optax.adam(1e-4)
 
     src_transform = tof_transform
@@ -240,20 +242,19 @@ def main(args):
                     with open(args.save, "wb") as f:
                         cloudpickle.dump(state, f)
     elif args.sample:
-        x,y = next(iter(val_dl))
-
+        x,y = next(iter(train_dl))
         x = src_transform(x) * 2 - 1
         y = tgt_transform(y) * 2 - 1
         y_hat, process = sample(state.params, key, condition=x)
 
         samples = jnp.concatenate((x,y,y_hat), axis=0)
-        samples = jnp.clamp((samples+1) * 0.5, 0., 1.)
+        samples = jnp.clip((samples+1) * 0.5, 0., 1.)
         samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
         utils.save_image(utils.make_grid(samples, nrow=4, normalize=False, padding=1, pad_value=1.0), "out.png")
 
         process = rearrange(process, "t b h w c -> b t h w c")
         process = process[0]
-        indices = jnp.arange(100)
+        #indices = jnp.arange(100)
 
         process = torch.from_numpy(np.array(process)).reshape(-1, 1, 256, 256)
         utils.save_image(utils.make_grid(process, nrow=25, normalize=False, padding=1, pad_value=1.0), "process.png")

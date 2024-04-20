@@ -137,7 +137,7 @@ class UNet(nn.Module):
             time_embed = None
 
         if condition is not None:
-            x = jnp.concatenate((condition, x), axis=3)
+            x = jnp.concatenate((condition, x), axis=-1)
 
         x = nn.Conv(features=init_dim, kernel_size=7, padding=3)(x)
 
@@ -162,7 +162,7 @@ class UNet(nn.Module):
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             h_l = h.pop()
-            x = jnp.concatenate((x, h_l), axis=3)
+            x = jnp.concatenate((x, h_l), axis=-1)
 
             is_last = ind >= (num_resolutions - 1)
             x = ResNetBlock(
