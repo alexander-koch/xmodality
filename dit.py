@@ -2,12 +2,12 @@ import jax
 import flax.linen as nn
 import jax.numpy as jnp
 from jax import random
-from typing import Union, Any, Tuple
+from typing import Union, Any, Optional
 from einops import rearrange
 import math
 
 
-def pair(x: Union[int, Tuple[int, int]]) -> Tuple[int, int]:
+def pair(x: Union[int, tuple[int, int]]) -> tuple[int, int]:
     return x if isinstance(x, tuple) else (x, x)
 
 
@@ -97,8 +97,8 @@ class DiTBlock(nn.Module):
 
 class FinalLayer(nn.Module):
     hidden_size: int
-    image_size: Tuple[int, int]
-    patch_size: Tuple[int, int]
+    image_size: tuple[int, int]
+    patch_size: tuple[int, int]
     channels: int
 
     @nn.compact
@@ -137,7 +137,7 @@ class FinalLayer(nn.Module):
 
 
 class DiT(nn.Module):
-    patch_size: Union[int, Tuple[int, int]] = 16
+    patch_size: Union[int, tuple[int, int]] = 16
     in_channels: int = 1
     hidden_size: int = 1024
     depth: int = 16
