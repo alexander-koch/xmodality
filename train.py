@@ -5,8 +5,11 @@ import optax
 from einops import rearrange
 from unet import UNet
 from dit import DiT
+from maxim import maxim
 import math
 import argparse
+import wandb
+import dm_pix as pix
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -100,18 +103,26 @@ class TrainingState(NamedTuple):
     params: dict
     opt_state: optax.OptState
     train_loss: jax.Array
-    val_loss: jax.Array
     key: jax.Array
 
 def main(args):
-    #module = UNet(128, channels=1)
-    module = DiT(patch_size=8, in_channels=1, dtype=jnp.bfloat16)
-    opt = optax.adam(1e-4)
+    if args.arch == "unet":
+        module = UNet(128, channels=1)
+    elif args.arch == "dit":
+        module = DiT(patch_size=8, in_channels=1, dtype=jnp.bfloat16)
+    elif args.arch == "maxim":
+        module = maxim(variant="S-2", use_bias=False, dtype=jnp.bfloat16)
+    else:
+        raise ValueError("invalid arch")
+
+    if args.wandb:
+        wandb.init(project="modality", config=args)
 
     src_transform = tof_transform
     tgt_transform = cta_transform
     min_snr_gamma = int(args.min_snr_gamma)
     validate_every_n_steps = int(args.validate_every_n_steps)
+    opt = optax.adam(1e-4)
 
     @jit
     def loss(params, batch):
@@ -134,6 +145,15 @@ def main(args):
 
         noise = random.normal(keys[1], x_start.shape)
         x_noised, log_snr = q_sample(x_start=x_start, times=times, noise=noise)
+
+        # Mixup source
+        #lam = random.beta(keys[2], 0.8, 0.8, shape=(x.shape[0],))
+        #indices = jnp.arange(x.shape[0])
+        #perm = random.permutation(keys[3], indices)
+        #x_noised = (1-lam[:, None, None, None]) * x_noised[perm] + lam[:, None, None, None] * x_noised
+        #log_snr = (1-lam) * log_snr[perm] + lam * log_snr
+        #condition = (1-lam[:, None, None, None]) * condition[perm] + lam[:, None, None, None] * condition
+
         model_out = module.apply(params, x_noised, time=log_snr, condition=x)
 
         padded_log_snr = right_pad_dims_to(x_noised, log_snr)
@@ -142,6 +162,10 @@ def main(args):
             jnp.sqrt(jax.nn.sigmoid(-padded_log_snr)),
         )
         target = alpha * noise - sigma * x_start
+
+
+        # Mixup targets
+        #target = (1-lam[:, None, None, None]) * target[perm] + lam[:, None, None, None] * target
 
         loss = jnp.square(model_out - target)
         loss = reduce(loss, "b ... -> b", "mean")
@@ -183,7 +207,7 @@ def main(args):
         train_loss_value, grads = jax.value_and_grad(diff_loss)(state.params, batch, keys[1:])
         updates, opt_state = opt.update(grads, state.opt_state)
         params = optax.apply_updates(state.params, updates)
-        return TrainingState(params, opt_state, train_loss_value, state.val_loss, next_state_key)
+        return TrainingState(params, opt_state, train_loss_value, next_state_key)
 
     train_ds = SliceDS("../modality/data/train_slices.pt")
     val_ds = SliceDS("../modality/data/val_slices.pt")
@@ -199,7 +223,7 @@ def main(args):
             shard_options=shard_opts,
             read_options=read_opts,
             operations=[Batch(batch_size=4, drop_remainder=False)])
-    val_dl = DataLoader(data_source=train_ds,
+    val_dl = DataLoader(data_source=val_ds,
             sampler=val_sampler,
             worker_count=0,
             shard_options=shard_opts,
@@ -211,38 +235,58 @@ def main(args):
     if args.load is not None:
         with open(args.load, "rb") as f:
             state = pickle.load(f)
+        print("train loss:", state.train_loss)
     else:
         x,y = next(iter(train_dl))
         dummy_time = jnp.array([0.0])
         initial_params = module.init(key, x, time=dummy_time, condition=y)
         initial_opt_state = opt.init(initial_params)
-        state = TrainingState(initial_params, initial_opt_state, None, None, key)
+        state = TrainingState(initial_params, initial_opt_state, None, key)
 
     if args.train:
         train_length = math.ceil(len(train_ds) / 4)
         total_steps = train_length * 400
+        log_every_n_steps = int(args.log_every_n_steps)
+        print("total_steps:", total_steps)
 
         train_dl = cycle(train_dl)
         for step in (p := tqdm(range(total_steps))):
             batch = next(train_dl)
             state = update(state, batch)
-            p.set_description(f"train_loss: {state.train_loss}, val_loss: {state.val_loss}")
+            p.set_description(f"train_loss: {state.train_loss}")
+
+            if args.wandb and (step % log_every_n_steps == log_every_n_steps-1):
+                wandb.log({"train_loss": state.train_loss})
 
             if step % validate_every_n_steps == validate_every_n_steps-1:
-                x,y = next(iter(val_dl))
+                names = ["train", "val"]
+                dls = [train_dl, val_dl]
+                log = {}
+                for name, dl in zip(names, dls):
+                    x,y = next(iter(dl))
 
-                x = src_transform(x) * 2 - 1
-                y = tgt_transform(y) * 2 - 1
-                y_hat, process = sample(state.params, key, condition=x)
+                    x = src_transform(x) * 2 - 1
+                    y = tgt_transform(y) * 2 - 1
+                    y_hat, process = sample(state.params, key, condition=x)
 
-                val_loss = jnp.mean(jnp.square(y - y_hat))
-                state = TrainingState(state.params, state.opt_state, state.train_loss, val_loss, state.key)
+                    mse = jnp.mean(jnp.square(y - y_hat))
+                    ssim = jnp.mean(pix.ssim(y_hat, y))
+                    psnr = jnp.mean(pix.psnr(y_hat, y))
+
+                    log[f"{name}/mse"] = mse
+                    log[f"{name}/ssim"] = ssim
+                    log[f"{name}/psnr"] = psnr
+
+                if args.wandb:
+                    wandb.log(log)
+                else:
+                    print(log)
                 
                 if args.save is not None:
                     with open(args.save, "wb") as f:
                         cloudpickle.dump(state, f)
     elif args.sample:
-        x,y = next(iter(train_dl))
+        x,y = next(iter(val_dl))
         x = src_transform(x) * 2 - 1
         y = tgt_transform(y) * 2 - 1
         y_hat, process = sample(state.params, key, condition=x)
@@ -253,8 +297,8 @@ def main(args):
         utils.save_image(utils.make_grid(samples, nrow=4, normalize=False, padding=1, pad_value=1.0), "out.png")
 
         process = rearrange(process, "t b h w c -> b t h w c")
+        process = jnp.clip((process+1) * 0.5, 0., 1.)
         process = process[0]
-        #indices = jnp.arange(100)
 
         process = torch.from_numpy(np.array(process)).reshape(-1, 1, 256, 256)
         utils.save_image(utils.make_grid(process, nrow=25, normalize=False, padding=1, pad_value=1.0), "process.png")
@@ -268,6 +312,9 @@ if __name__ == "__main__":
     p.add_argument("--train", action="store_true", help="train the model")
     p.add_argument("--sample", action="store_true", help="sample the model")
     p.add_argument("--validate_every_n_steps", type=int, default=1000, help="validate the model every n steps")
+    p.add_argument("--log_every_n_steps", type=int, default=20, help="log the metrics every n steps")
     p.add_argument("--min_snr_gamma", type=float, default=5.0, help="set loss weighting for min snr")
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
+    p.add_argument("--arch", type=str, choices=["unet", "dit", "maxim"], default="unet", help="which architecture to use")
+    p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
     main(p.parse_args())

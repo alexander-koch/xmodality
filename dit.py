@@ -5,6 +5,11 @@ from jax import random
 from typing import Union, Any, Optional
 from einops import rearrange
 import math
+from unet import ResNetBlock
+from talking_heads import talking_heads_dot_product_attention
+from functools import partial
+import scipy
+import pickle
 
 
 def pair(x: Union[int, tuple[int, int]]) -> tuple[int, int]:
@@ -27,7 +32,6 @@ def timestep_embedding(t: jax.Array, dim: int, max_period: int = 10000) -> jax.A
 
 def modulate(x: jax.Array, shift: jax.Array, scale: jax.Array) -> jax.Array:
     return x * (1 + scale[:, jnp.newaxis]) + shift[:, jnp.newaxis]
-
 
 class SwiGLU(nn.Module):
     dim: int
@@ -78,6 +82,7 @@ class DiTBlock(nn.Module):
                     6 * self.hidden_size,
                     kernel_init=nn.initializers.zeros,
                     bias_init=nn.initializers.zeros,
+                    dtype=self.dtype
                 ),
             ]
         )(c)
@@ -85,14 +90,15 @@ class DiTBlock(nn.Module):
             adaln, 6, axis=-1
         )
 
-        x_hat = modulate(nn.RMSNorm()(x), shift_msa, scale_msa)
-        x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads)(x_hat)
+        x_hat = modulate(nn.RMSNorm(use_scale=False)(x), shift_msa, scale_msa)
+        x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads, attention_fn=talking_heads_dot_product_attention, dtype=self.dtype)(x_hat)
         x = x + gate_msa[:, jnp.newaxis] * x_hat
 
-        x_hat = modulate(nn.RMSNorm()(x), shift_mlp, scale_mlp)
+        x_hat = modulate(nn.RMSNorm(use_scale=False)(x), shift_mlp, scale_mlp)
         x_hat = SwiGLU(dim=self.hidden_size, mlp_dim=mlp_dim, dtype=self.dtype)(x_hat)
         x = x + gate_mlp[:, jnp.newaxis] * x_hat
         return x
+
 
 
 class FinalLayer(nn.Module):
@@ -100,6 +106,7 @@ class FinalLayer(nn.Module):
     image_size: tuple[int, int]
     patch_size: tuple[int, int]
     channels: int
+    dtype: Any = jnp.float32
 
     @nn.compact
     def __call__(self, x: jax.Array, c: jax.Array) -> jax.Array:
@@ -114,17 +121,20 @@ class FinalLayer(nn.Module):
                     2 * self.hidden_size,
                     kernel_init=nn.initializers.zeros,
                     bias_init=nn.initializers.zeros,
+                    dtype=self.dtype
                 ),
             ]
         )(c)
         shift, scale = jnp.split(adaln, 2, axis=-1)
 
-        x = modulate(nn.RMSNorm()(x), shift, scale)
+        x = modulate(nn.RMSNorm(use_scale=False)(x), shift, scale)
         x = nn.Dense(
             self.patch_size[0] * self.patch_size[1] * self.channels,
             kernel_init=nn.initializers.zeros,
             bias_init=nn.initializers.zeros,
+            dtype=self.dtype
         )(x)
+
         x = rearrange(
             x,
             "b (h w) (p1 p2 c) -> b (h p1) (w p2) c",
@@ -156,7 +166,6 @@ class DiT(nn.Module):
         if condition is not None:
             x = jnp.concatenate((x, condition), axis=-1)
 
-        # Embed the image
         x = rearrange(
             x,
             "b (h p1) (w p2) c -> b (h w) (p1 p2 c)",
@@ -168,6 +177,7 @@ class DiT(nn.Module):
             self.hidden_size,
             kernel_init=nn.initializers.glorot_uniform(),
             bias_init=nn.initializers.zeros,
+            dtype=self.dtype
         )(x)
         x = nn.LayerNorm()(x)
 
@@ -178,21 +188,26 @@ class DiT(nn.Module):
                 nn.Dense(
                     self.hidden_size,
                     kernel_init=nn.initializers.truncated_normal(stddev=0.02),
+                    dtype=self.dtype
                 ),
                 nn.silu,
                 nn.Dense(
                     self.hidden_size,
                     kernel_init=nn.initializers.truncated_normal(stddev=0.02),
+                    dtype=self.dtype
                 ),
             ]
         )(t_freq)
 
+        # Transformer blocks
+        l = x.shape[1]
         for _ in range(self.depth):
             x = DiTBlock(
                 self.hidden_size, self.num_heads, self.mlp_ratio, dtype=self.dtype
             )(x, t_emb)
 
-        x = FinalLayer(self.hidden_size, image_size, patch_size, self.in_channels)(
+        # Unpatching
+        x = FinalLayer(self.hidden_size, image_size, patch_size, self.in_channels, dtype=self.dtype)(
             x, t_emb
         )
         return x
