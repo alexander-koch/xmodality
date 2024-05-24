@@ -1,22 +1,48 @@
 import functools
 from typing import Any, Sequence, Tuple, Optional
 import math
-import einops
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from einops import rearrange
 
 
 Conv3x3 = functools.partial(nn.Conv, kernel_size=(3, 3))
 Conv1x1 = functools.partial(nn.Conv, kernel_size=(1, 1))
-ConvT_up = functools.partial(nn.ConvTranspose,
-                             kernel_size=(2, 2),
-                             strides=(2, 2))
-Conv_down = functools.partial(nn.Conv,
-                              kernel_size=(4, 4),
-                              strides=(2, 2))
+#ConvT_up = functools.partial(nn.ConvTranspose,
+#                             kernel_size=(2, 2),
+#                             strides=(2, 2))
+#Conv_down = functools.partial(nn.Conv,
+#                              kernel_size=(4, 4),
+#                              strides=(2, 2))
 
 weight_initializer = nn.initializers.normal(stddev=2e-2)
+
+
+class PixelShuffleUpsample(nn.Module):
+    dim: int
+    ratio: int = 2
+    use_bias: bool = True
+    dtype: Any = jnp.float32
+
+    @nn.compact
+    def __call__(self, x: jax.Array) -> jax.Array:
+        x = nn.Sequential([nn.Dense(self.dim * int(self.ratio ** 2), use_bias=self.use_bias, dtype=self.dtype), nn.gelu])(x)
+        x = rearrange(x, "b h w (c s1 s2) -> b (h s1) (w s2) c", s1=self.ratio, s2=self.ratio)
+        return x
+
+
+class PixelShuffleDownsample(nn.Module):
+    dim: int
+    ratio: int = 2
+    use_bias: bool = True
+    dtype: Any = jnp.float32
+
+    @nn.compact
+    def __call__(self, x: jax.Array) -> jax.Array:
+        x = rearrange(x, "b (h s1) (w s2) c -> b h w (c s1 s2)", s1=self.ratio, s2=self.ratio)
+        x = nn.Dense(self.dim, use_bias=self.use_bias, dtype=self.dtype)(x)
+        return x
 
 def timestep_embedding(t: jax.Array, dim: int, max_period: int = 10000) -> jax.Array:
     half = dim // 2
@@ -58,7 +84,7 @@ def block_images_einops(x, patch_size):
   batch, height, width, channels = x.shape
   grid_height = height // patch_size[0]
   grid_width = width // patch_size[1]
-  x = einops.rearrange(
+  x = rearrange(
       x, "n (gh fh) (gw fw) c -> n (gh gw) (fh fw) c",
       gh=grid_height, gw=grid_width, fh=patch_size[0], fw=patch_size[1])
   return x
@@ -66,27 +92,27 @@ def block_images_einops(x, patch_size):
 
 def unblock_images_einops(x, grid_size, patch_size):
   """patches to images."""
-  x = einops.rearrange(
+  x = rearrange(
       x, "n (gh gw) (fh fw) c -> n (gh fh) (gw fw) c",
       gh=grid_size[0], gw=grid_size[1], fh=patch_size[0], fw=patch_size[1])
   return x
 
 
-class UpSampleRatio(nn.Module):
-  """Upsample features given a ratio > 0."""
-  features: int
-  ratio: float
-  use_bias: bool = True
-
-  @nn.compact
-  def __call__(self, x):
-    n, h, w, c = x.shape
-    x = jax.image.resize(
-        x,
-        shape=(n, int(h * self.ratio), int(w * self.ratio), c),
-        method="bilinear")
-    x = Conv1x1(features=self.features, use_bias=self.use_bias)(x)
-    return x
+#class UpSampleRatio(nn.Module):
+#  """Upsample features given a ratio > 0."""
+#  features: int
+#  ratio: float
+#  use_bias: bool = True
+#
+#  @nn.compact
+#  def __call__(self, x):
+#    n, h, w, c = x.shape
+#    x = jax.image.resize(
+#        x,
+#        shape=(n, int(h * self.ratio), int(w * self.ratio), c),
+#        method="bilinear")
+#    x = Conv1x1(features=self.features, use_bias=self.use_bias)(x)
+#    return x
 
 
 class CALayer(nn.Module):
@@ -104,7 +130,8 @@ class CALayer(nn.Module):
     y = jnp.mean(x, axis=[1, 2], keepdims=True)
     # Squeeze (in Squeeze-Excitation)
     y = Conv1x1(self.features // self.reduction, use_bias=self.use_bias)(y)
-    y = nn.relu(y)
+    #y = nn.relu(y)
+    y = nn.gelu(y)
     # Excitation (in Squeeze-Excitation)
     y = Conv1x1(self.features, use_bias=self.use_bias)(y)
     y = nn.sigmoid(y)
@@ -115,7 +142,6 @@ class RCAB(nn.Module):
   """Residual channel attention block. Contains LN,Conv,lRelu,Conv,SELayer."""
   features: int
   reduction: int = 4
-  lrelu_slope: float = 0.2
   use_bias: bool = True
 
   @nn.compact
@@ -124,7 +150,8 @@ class RCAB(nn.Module):
     #x = nn.LayerNorm(name="LayerNorm")(x)
     x = nn.RMSNorm(use_scale=False)(x)
     x = Conv3x3(features=self.features, use_bias=self.use_bias, name="conv1")(x)
-    x = nn.leaky_relu(x, negative_slope=self.lrelu_slope)
+    #x = nn.leaky_relu(x, negative_slope=self.lrelu_slope)
+    x = nn.gelu(x)
     x = Conv3x3(features=self.features, use_bias=self.use_bias, name="conv2")(x)
     x = CALayer(features=self.features, reduction=self.reduction,
                 use_bias=self.use_bias, name="channel_attention")(x)
@@ -335,7 +362,7 @@ class BottleneckBlock(nn.Module):
 
     adaln = nn.Sequential(
         [
-            nn.silu,
+            nn.gelu,
             nn.Dense(
                 3 * self.features,
                 kernel_init=nn.initializers.zeros,
@@ -383,7 +410,6 @@ class UNetEncoderBlock(nn.Module):
   block_size: Sequence[int]
   grid_size: Sequence[int]
   num_groups: int = 1
-  lrelu_slope: float = 0.2
   block_gmlp_factor: int = 2
   grid_gmlp_factor: int = 2
   input_proj_factor: int = 2
@@ -405,7 +431,7 @@ class UNetEncoderBlock(nn.Module):
 
     adaln = nn.Sequential(
         [
-            nn.silu,
+            nn.gelu,
             nn.Dense(
                 3 * self.features,
                 kernel_init=nn.initializers.zeros,
@@ -457,7 +483,8 @@ class UNetEncoderBlock(nn.Module):
               x, enc + dec, deterministic=deterministic)
 
     if self.downsample:
-      x_down = Conv_down(self.features, use_bias=self.use_bias)(x)
+      #x_down = Conv_down(self.features, use_bias=self.use_bias)(x)
+      x_down = PixelShuffleDownsample(self.features, use_bias=self.use_bias, dtype=self.dtype)(x)
       return x_down, x
     else:
       return x
@@ -469,7 +496,6 @@ class UNetDecoderBlock(nn.Module):
   block_size: Sequence[int]
   grid_size: Sequence[int]
   num_groups: int = 1
-  lrelu_slope: float = 0.2
   block_gmlp_factor: int = 2
   grid_gmlp_factor: int = 2
   input_proj_factor: int = 2
@@ -483,12 +509,12 @@ class UNetDecoderBlock(nn.Module):
   @nn.compact
   def __call__(self, x: jax.Array, bridge: jax.Array = None,
                deterministic: bool = True, condition = None) -> jax.Array:
-    x = ConvT_up(self.features, use_bias=self.use_bias)(x)
+    #x = ConvT_up(self.features, use_bias=self.use_bias)(x)
+    x = PixelShuffleUpsample(self.features, use_bias=self.use_bias, dtype=self.dtype)(x)
 
     x = UNetEncoderBlock(
         self.features,
         num_groups=self.num_groups,
-        lrelu_slope=self.lrelu_slope,
         block_size=self.block_size,
         grid_size=self.grid_size,
         block_gmlp_factor=self.block_gmlp_factor,
@@ -573,7 +599,8 @@ class CrossGatingBlock(nn.Module):
   def __call__(self, x, y, deterministic=True):
     # Upscale Y signal, y is the gating signal.
     if self.upsample_y:
-      y = ConvT_up(self.features, use_bias=self.use_bias)(y)
+      #y = ConvT_up(self.features, use_bias=self.use_bias)(y)
+      y = PixelShuffleUpsample(self.features, use_bias=self.use_bias, dtype=self.dtype)(y)
 
     x = Conv1x1(self.features, use_bias=self.use_bias)(x)
     n, h, w, num_channels = x.shape
@@ -682,7 +709,6 @@ class MAXIM(nn.Module):
     num_groups: how many blocks each stage contains.
     use_bias: whether to use bias in all the conv/mlp layers.
     num_supervision_scales: the number of desired supervision scales.
-    lrelu_slope: the negative slope parameter in leaky_relu layers.
     use_global_mlp: whether to use the multi-axis gated MLP block (MAB) in each
       layer.
     use_cross_gating: whether to use the cross-gating MLP block (CGB) in the
@@ -716,7 +742,6 @@ class MAXIM(nn.Module):
   num_groups: int = 1
   use_bias: bool = True
   num_supervision_scales: int = 1
-  lrelu_slope: float = 0.2
   use_global_mlp: bool = True
   use_cross_gating: bool = True
   high_res_stages: int = 2
@@ -751,7 +776,7 @@ class MAXIM(nn.Module):
                     kernel_init=nn.initializers.truncated_normal(stddev=0.02),
                     dtype=self.dtype
                 ),
-                nn.silu,
+                nn.gelu,
                 nn.Dense(
                     (2 ** i) * self.features,
                     kernel_init=nn.initializers.truncated_normal(stddev=0.02),
@@ -833,7 +858,6 @@ class MAXIM(nn.Module):
             features=(2**i) * self.features,
             num_groups=self.num_groups,
             downsample=True,
-            lrelu_slope=self.lrelu_slope,
             block_size=block_size,
             grid_size=grid_size,
             block_gmlp_factor=self.block_gmlp_factor,
@@ -882,11 +906,14 @@ class MAXIM(nn.Module):
         grid_size = self.grid_size_hr if i < self.high_res_stages else self.block_size_lr
 
         # get additional multi-scale signals
+        ratios = [2**(j - i) for j in range(len(encs))]
         signal = jnp.concatenate([
-            UpSampleRatio(
-                (2**i) * self.features,
-                ratio=2**(j - i),
-                use_bias=self.use_bias)(enc) for j, enc in enumerate(encs)
+            #UpSampleRatio(
+            #    (2**i) * self.features,
+            #    ratio=2**(j - i),
+            #    use_bias=self.use_bias)(enc) for j, enc in enumerate(encs)
+            #PixelShuffleUpsample((2**i)*self.features, ratio=2**(j-i), use_bias=self.use_bias)(enc) for j, enc in enumerate(encs)
+            PixelShuffleDownsample((2**i) * self.features, int(1 / ratios[j]), use_bias=self.use_bias)(enc) if ratios[j] < 1 else PixelShuffleUpsample((2**i) * self.features, ratios[j], use_bias=self.use_bias)(enc) for j, enc in enumerate(encs)
         ],
                                  axis=-1)
 
@@ -919,12 +946,15 @@ class MAXIM(nn.Module):
         grid_size = self.grid_size_hr if i < self.high_res_stages else self.block_size_lr
 
         # get multi-scale skip signals from cross-gating block
+        #print("decoder:", [(2**(self.depth - j - 1 - i), 2**i, 2**j) for j, skip in enumerate(skip_features)])
+        ratios = [2**(self.depth - j - 1 - i) for j in range(len(skip_features))]
         signal = jnp.concatenate([
-            UpSampleRatio(
-                (2**i) * self.features,
-                ratio=2**(self.depth - j - 1 - i),
-                use_bias=self.use_bias)(skip)
-            for j, skip in enumerate(skip_features)
+            #UpSampleRatio(
+            #    (2**i) * self.features,
+            #    ratio=2**(self.depth - j - 1 - i),
+            #    use_bias=self.use_bias)(skip)
+            #for j, skip in enumerate(skip_features)
+            PixelShuffleDownsample((2**i) * self.features, int(1 / ratios[j]), use_bias=self.use_bias)(skip) if ratios[j] < 1 else PixelShuffleUpsample((2**i) * self.features, ratios[j], use_bias=self.use_bias)(skip) for j, skip in enumerate(skip_features)
         ],
                                  axis=-1)
 
@@ -932,7 +962,6 @@ class MAXIM(nn.Module):
         x = UNetDecoderBlock(
             features=(2**i) * self.features,
             num_groups=self.num_groups,
-            lrelu_slope=self.lrelu_slope,
             block_size=block_size,
             grid_size=grid_size,
             block_gmlp_factor=self.block_gmlp_factor,

@@ -10,7 +10,7 @@ from talking_heads import talking_heads_dot_product_attention
 from functools import partial
 import scipy
 import pickle
-
+from fourier import FourierTransform
 
 def pair(x: Union[int, tuple[int, int]]) -> tuple[int, int]:
     return x if isinstance(x, tuple) else (x, x)
@@ -92,6 +92,7 @@ class DiTBlock(nn.Module):
 
         x_hat = modulate(nn.RMSNorm(use_scale=False)(x), shift_msa, scale_msa)
         x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads, attention_fn=talking_heads_dot_product_attention, dtype=self.dtype)(x_hat)
+        #x_hat = FourierTransform(dim=self.hidden_size, seq_len=256)(x_hat)
         x = x + gate_msa[:, jnp.newaxis] * x_hat
 
         x_hat = modulate(nn.RMSNorm(use_scale=False)(x), shift_mlp, scale_mlp)
