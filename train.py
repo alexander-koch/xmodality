@@ -6,7 +6,6 @@ from einops import rearrange
 from unet import UNet
 from dit import DiT
 from uvit import UViT
-from maxim import maxim
 import math
 import argparse
 import wandb
@@ -48,7 +47,7 @@ def q_sample(x_start: jax.Array, times: jax.Array, noise: jax.Array):
     x_noised = x_start * alpha + noise * sigma
     return x_noised, log_snr
  
-def p_sample(model_fn, key, x, time, time_next, **kwargs):
+def p_sample(model_fn, key, x, time, time_next, objective="v", **kwargs):
     log_snr = logsnr_schedule_cosine(time)
     log_snr_next = logsnr_schedule_cosine(time_next)
     c = -jnp.expm1(log_snr - log_snr_next)
@@ -63,8 +62,14 @@ def p_sample(model_fn, key, x, time, time_next, **kwargs):
     batch_log_snr = repeat(log_snr, " -> b", b=x.shape[0])
     pred = model_fn(x, time=batch_log_snr, **kwargs)
 
-    x_start = jnp.clip(alpha * x - sigma * pred, -1, 1)
-    #x_start = jnp.clip(model_fn(x, time=batch_log_snr, **kwargs), -1, 1)
+    if objective == "v":
+        x_start = alpha * x - sigma * pred
+    elif objective == "eps":
+        x_start = (x - sigma * pred) / alpha
+    elif objective == "start":
+        x_start = pred
+
+    x_start = jnp.clip(x_start, -1, 1)
 
     model_mean = alpha_next * (x * (1 - c) / alpha + c * x_start)
     posterior_variance = squared_sigma_next * c
@@ -115,16 +120,14 @@ class TrainingState(NamedTuple):
 def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     print("dtype:", dtype)
-    print("arch:", args.arch)
+    print("config:", args)
 
     if args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
     elif args.arch == "dit":
-        module = DiT(patch_size=16, hidden_size=2048, depth=8, num_heads=4, in_channels=1, dtype=dtype)
+        module = DiT(patch_size=16, hidden_size=1024, depth=8, num_heads=4, in_channels=1, dtype=dtype)
     elif args.arch == "uvit":
         module = UViT(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "maxim":
-        module = maxim(variant="S-2", use_bias=False, dtype=dtype)
     else:
         raise ValueError("invalid arch")
 
@@ -133,7 +136,13 @@ def main(args):
 
     min_snr_gamma = int(args.min_snr_gamma)
     validate_every_n_steps = int(args.validate_every_n_steps)
-    opt = optax.adam(1e-4)
+
+    if args.grad_clip:
+        opt = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.adam(1e-4))
+    else:
+        opt = optax.adam(1e-4)
 
     def base_loss(params, batch, keys):
         x, y = batch
@@ -142,7 +151,7 @@ def main(args):
         y_hat = module.apply(params, x)
         return jnp.mean(jnp.square(y_hat - y))
 
-    def diff_loss(params, batch, keys):
+    def diff_loss(params, batch, keys, objective="v", use_minsnr=True):
         x, y = batch
         x = x * 2 - 1
         y = y * 2 - 1
@@ -152,27 +161,45 @@ def main(args):
 
         noise = random.normal(keys[1], x_start.shape)
         x_noised, log_snr = q_sample(x_start=x_start, times=times, noise=noise)
+        
+        # Randomly dropout condition
+        #p = jnp.random.bernoulli(keys[2], shape=(x.shape[0],))
+        #condition = x * p
 
         model_out = module.apply(params, x_noised, time=log_snr, condition=x)
 
-        padded_log_snr = right_pad_dims_to(x_noised, log_snr)
-        alpha, sigma = (
-            jnp.sqrt(jax.nn.sigmoid(padded_log_snr)),
-            jnp.sqrt(jax.nn.sigmoid(-padded_log_snr)),
-        )
-        target = alpha * noise - sigma * x_start
-        #target = x_start
+        if objective == "v":
+            padded_log_snr = right_pad_dims_to(x_noised, log_snr)
+            alpha, sigma = (
+                jnp.sqrt(jax.nn.sigmoid(padded_log_snr)),
+                jnp.sqrt(jax.nn.sigmoid(-padded_log_snr)),
+            )
+            target = alpha * noise - sigma * x_start
+        elif objective == "eps":
+            target = noise
+        elif objective == "start":
+            target = x_start
 
         loss = jnp.square(model_out - target)
         loss = reduce(loss, "b ... -> b", "mean")
 
         snr = jnp.exp(log_snr)
-        clipped_snr = jnp.clip(snr, a_max=min_snr_gamma)
-        loss_weight = clipped_snr / (snr + 1)
+        if use_minsnr:
+            clipped_snr = jnp.clip(snr, a_max=min_snr_gamma)
+        else:
+            clipped_snr = snr
+
+        if objective == "v":
+            loss_weight = clipped_snr / (snr + 1)
+        elif objective == "eps":
+            loss_weight = clipped_snr / snr
+        elif objective == "start":
+            loss_weight = clipped_snr
+
         loss = (loss * loss_weight).mean()
         return loss
 
-    loss_fn = base_loss if args.baseline else diff_loss
+    loss_fn = base_loss if args.baseline else partial(diff_loss, objective=args.objective, use_minsnr=not args.disable_minsnr)
     
     @jit
     def sample(params, key, img, num_sample_steps=100, **kwargs):
@@ -185,7 +212,7 @@ def main(args):
         def f(carry, x):
             img, index = carry
             time, time_next = x
-            img = p_sample(model_fn, keys[index+1], img, time, time_next, **kwargs)
+            img = p_sample(model_fn, keys[index+1], img, time, time_next, objective=args.objective, **kwargs)
             return (img, index+1), img
 
         # "always scan when you can!"
@@ -250,7 +277,7 @@ def main(args):
         state = TrainingState(initial_params, initial_opt_state, None, key)
 
     if args.train:
-        num_epochs = 200
+        num_epochs = 400
         train_length = math.ceil(len(train_ds) / batch_size)
         total_steps = train_length * num_epochs
         log_every_n_steps = int(args.log_every_n_steps)
@@ -263,7 +290,7 @@ def main(args):
             p.set_description(f"train_loss: {state.train_loss}")
 
             if args.wandb and (step % log_every_n_steps == log_every_n_steps-1):
-                wandb.log({"train_loss": state.train_loss})#, step=step)
+                wandb.log({"train_loss": state.train_loss}, step=step)
 
             if step % validate_every_n_steps == validate_every_n_steps-1:
                 names = ["train", "val"]
@@ -295,7 +322,7 @@ def main(args):
                     log[f"{name}/psnr"] = psnr.item()
 
                 if args.wandb:
-                    wandb.log(log)#, step=step)
+                    wandb.log(log, step=step)
                 else:
                     print(log)
                 
@@ -359,8 +386,11 @@ if __name__ == "__main__":
     p.add_argument("--log_every_n_steps", type=int, default=20, help="log the metrics every n steps")
     p.add_argument("--min_snr_gamma", type=float, default=5.0, help="set loss weighting for min snr")
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
-    p.add_argument("--arch", type=str, choices=["unet", "dit", "uvit", "maxim"], default="unet", help="which architecture to use")
+    p.add_argument("--arch", type=str, choices=["unet", "dit", "uvit"], default="unet", help="which architecture to use")
     p.add_argument("--batch_size", type=int, default=16, help="batch size")
+    p.add_argument("--objective", type=str, default="v", choices=["v", "eps", "start"], help="diffusion objective")
     p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
     p.add_argument("--baseline", action="store_true", help="use unet baseline")
+    p.add_argument("--grad_clip", action="store_true", help="use gradient clipping")
+    p.add_argument("--disable_minsnr", action="store_true", help="disable min snr loss weighting")
     main(p.parse_args())

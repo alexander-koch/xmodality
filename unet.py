@@ -58,13 +58,6 @@ class ResNetBlock(nn.Module):
         if time_emb is not None:
             t = nn.Sequential(
                 [
-                    nn.Dense(
-                        features=self.dim_out * 2,
-                        kernel_init=nn.initializers.glorot_uniform(),
-                        bias_init=nn.initializers.zeros,
-                        dtype=self.dtype,
-                    ),
-                    nn.RMSNorm(),
                     nn.gelu,
                     nn.Dense(
                         features=self.dim_out * 2,
@@ -150,7 +143,6 @@ class UNet(nn.Module):
                         bias_init=nn.initializers.zeros,
                         dtype=self.dtype,
                     ),
-                    nn.RMSNorm(),
                     nn.gelu,
                     nn.Dense(
                         features=time_emb_dim,
@@ -158,8 +150,6 @@ class UNet(nn.Module):
                         bias_init=nn.initializers.zeros,
                         dtype=self.dtype,
                     ),
-                    nn.RMSNorm(),
-                    nn.gelu,
                 ]
             )(time)
         else:

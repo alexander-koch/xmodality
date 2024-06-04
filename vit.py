@@ -7,6 +7,38 @@ from einops import rearrange
 from utils import triple
 
 
+class SwiGLU(nn.Module):
+    dim: int
+    mlp_dim: int
+    dtype: Any = jnp.float32
+
+    @nn.compact
+    def __call__(self, x: jax.Array) -> jax.Array:
+        x_gate = nn.Dense(
+            features=self.mlp_dim,
+            use_bias=True,
+            dtype=self.dtype,
+            kernel_init=nn.initializers.glorot_uniform(),
+            bias_init=nn.initializers.zeros,
+        )(x)
+        x = nn.Dense(
+            features=self.mlp_dim,
+            use_bias=True,
+            dtype=self.dtype,
+            kernel_init=nn.initializers.glorot_uniform(),
+            bias_init=nn.initializers.zeros,
+        )(x)
+        x = nn.silu(x_gate) * x
+        x = nn.Dense(
+            features=self.dim,
+            use_bias=True,
+            dtype=self.dtype,
+            kernel_init=nn.initializers.glorot_uniform(),
+            bias_init=nn.initializers.zeros,
+        )(x)
+        return x
+
+
 class MLP(nn.Module):
     dim: int
     mlp_dim: int
