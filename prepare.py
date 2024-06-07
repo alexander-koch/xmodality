@@ -6,7 +6,7 @@ from typing import Any
 from functools import reduce
 from tqdm import tqdm
 
-THRESHOLD = 10
+THRESHOLD = 200
 DICE_OVERLAP = 0.3
 
 def get_num_slices(sources):
@@ -42,9 +42,11 @@ class MultiModalDataset:
             img = nib.load(src_path).get_fdata().astype(np.float32)
 
             # Src transform
-            img = np.maximum(0, img)
             max_v = np.quantile(img, 0.999)
-            img = img / max_v
+            #min_v = np.quantile(img, 0.01)
+            min_v = 0
+            img = img.clip(min_v, max_v)
+            img = (img - min_v) / (max_v - min_v)
 
             self.last_source = img
             self.last_source_path = src_path
@@ -90,6 +92,7 @@ def write_ds(ds, prefix):
         num_src_pixels = src_mask.sum()
         num_tgt_pixels = tgt_mask.sum()
         dice_overlap = 2 * (src_mask * tgt_mask).sum() / (num_src_pixels + num_tgt_pixels)
+
         if dice_overlap < DICE_OVERLAP or num_src_pixels < THRESHOLD or num_tgt_pixels < THRESHOLD:
             continue
         np.savez_compressed(f"data/{prefix}_{i}.npz", src=src, tgt=tgt)
