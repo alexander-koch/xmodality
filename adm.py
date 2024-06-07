@@ -1,3 +1,8 @@
+# ADM
+# 128 base channels
+# 2 residual blocks
+# multi-resolution attention
+
 import jax
 import jax.numpy as jnp
 import math
@@ -37,8 +42,7 @@ class Block(nn.Module):
             bias_init=nn.initializers.zeros,
             dtype=self.dtype,
         )(x)
-        #x = nn.RMSNorm()(x)
-        x = nn.GroupNorm(32)(x)
+        x = nn.RMSNorm()(x)
 
         if scale_shift is not None:
             scale, shift = scale_shift
@@ -116,10 +120,11 @@ class PixelShuffleDownsample(nn.Module):
         return x
 
 
-class UNet(nn.Module):
+class ADM(nn.Module):
     dim: int
     dim_mults: tuple[int, ...] = (1, 2, 4)
     channels: int = 3
+    num_heads: int = 4
     dtype: Any = jnp.float32
 
     @nn.compact
@@ -157,6 +162,9 @@ class UNet(nn.Module):
             time_emb_dim = None
             time_embed = None
 
+        if condition is not None:
+            x = jnp.concatenate((condition, x), axis=-1)
+
         x = nn.Conv(
             features=self.dim,
             kernel_size=(7,7),
@@ -178,11 +186,37 @@ class UNet(nn.Module):
             )(x, time_embed)
             h.append(x)
 
+            x = ResNetBlock(
+                dim=dim_out,
+                dim_out=dim_out,
+                time_emb_dim=time_emb_dim,
+                dtype=self.dtype,
+            )(x, time_embed)
+            x_hat = nn.RMSNorm()(x)
+            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
+                    kernel_init=nn.initializers.glorot_uniform(),
+                    bias_init=nn.initializers.zeros,
+                    dtype=self.dtype)(x_hat)
+            x = x + x_hat
+            h.append(x)
+
             if not is_last:
                 x = PixelShuffleDownsample(dim=dim_out, dtype=self.dtype)(x)
 
         # Middle block + attn + block
         mid_dim = dims[-1]
+        x = ResNetBlock(
+            dim=mid_dim,
+            dim_out=mid_dim,
+            time_emb_dim=time_emb_dim,
+            dtype=self.dtype,
+        )(x, time_embed)
+        x_hat = nn.RMSNorm()(x)
+        x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype)(x_hat)
+        x = x + x_hat
         x = ResNetBlock(
             dim=mid_dim,
             dim_out=mid_dim,
@@ -201,6 +235,21 @@ class UNet(nn.Module):
                 time_emb_dim=time_emb_dim,
                 dtype=self.dtype,
             )(x, time_embed)
+
+            h_l = h.pop()
+            x = jnp.concatenate((x, h_l), axis=-1)
+            x = ResNetBlock(
+                dim=dim_in,
+                dim_out=dim_in,
+                time_emb_dim=time_emb_dim,
+                dtype=self.dtype,
+            )(x, time_embed)
+            x_hat = nn.RMSNorm()(x)
+            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
+                    kernel_init=nn.initializers.glorot_uniform(),
+                    bias_init=nn.initializers.zeros,
+                    dtype=self.dtype)(x_hat)
+            x = x + x_hat
 
             if not is_last:
                 x = PixelShuffleUpsample(dim=dim_in, dtype=self.dtype)(x)

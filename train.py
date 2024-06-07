@@ -4,6 +4,7 @@ import numpy as np
 import optax
 from einops import rearrange
 from unet import UNet
+from adm import ADM
 from dit import DiT
 from uvit import UViT
 import math
@@ -22,6 +23,7 @@ from einops import reduce, repeat
 from functools import partial
 import cloudpickle
 import pickle
+from jax_tqdm import scan_tqdm
 
 def cycle(dl: Iterable[Any]) -> Any:
     while True:
@@ -117,6 +119,8 @@ class TrainingState(NamedTuple):
     train_loss: jax.Array
     key: jax.Array
 
+SEED = 42
+
 def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     print("dtype:", dtype)
@@ -124,25 +128,22 @@ def main(args):
 
     if args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
+    elif args.arch == "adm":
+        module = ADM(dim=128, channels=1, dtype=dtype)
     elif args.arch == "dit":
-        module = DiT(patch_size=16, hidden_size=1024, depth=8, num_heads=4, in_channels=1, dtype=dtype)
+        # DiT-L/16
+        module = DiT(patch_size=2, hidden_size=1024, depth=16, num_heads=16, in_channels=1, dtype=dtype)
     elif args.arch == "uvit":
         module = UViT(dim=128, channels=1, dtype=dtype)
     else:
         raise ValueError("invalid arch")
 
     if args.wandb:
-        wandb.init(project="modality", config=args)
+        wandb.init(project="xmodality_paper", config=args)
 
     min_snr_gamma = int(args.min_snr_gamma)
     validate_every_n_steps = int(args.validate_every_n_steps)
-
-    if args.grad_clip:
-        opt = optax.chain(
-            optax.clip_by_global_norm(1.0),
-            optax.adam(1e-4))
-    else:
-        opt = optax.adam(1e-4)
+    opt = optax.adam(1e-4)
 
     def base_loss(params, batch, keys):
         x, y = batch
@@ -161,11 +162,6 @@ def main(args):
 
         noise = random.normal(keys[1], x_start.shape)
         x_noised, log_snr = q_sample(x_start=x_start, times=times, noise=noise)
-        
-        # Randomly dropout condition
-        #p = jnp.random.bernoulli(keys[2], shape=(x.shape[0],))
-        #condition = x * p
-
         model_out = module.apply(params, x_noised, time=log_snr, condition=x)
 
         if objective == "v":
@@ -208,7 +204,7 @@ def main(args):
         steps = jnp.linspace(1.0, 0.0, num_sample_steps+1)
         xs = jnp.stack((steps[:-1], steps[1:]), axis=1)
         model_fn = partial(module.apply, params)
-
+    
         def f(carry, x):
             img, index = carry
             time, time_next = x
@@ -231,21 +227,25 @@ def main(args):
         train_loss_value, grads = jax.value_and_grad(loss_fn)(state.params, batch, keys[1:])
         updates, opt_state = opt.update(grads, state.opt_state, params=state.params)
         params = optax.apply_updates(state.params, updates)
+
         return TrainingState(params, opt_state, train_loss_value, next_state_key)
 
-    train_paths = list(glob("../modality/data/train*.npz"))
-    val_paths = list(glob("../modality/data/val*.npz"))
+    train_paths = sorted(list(glob("data/train*.npz")))
+    val_paths = sorted(list(glob("data/val*.npz")))
+    test_paths = sorted(list(glob("data/test*.npz")))
 
     train_ds = SliceDS(train_paths)
     val_ds = SliceDS(val_paths)
+    test_ds = SliceDS(test_paths)
 
     batch_size = int(args.batch_size)
 
     # Setup dataloaders
     shard_opts = ShardOptions(0, 1)
     read_opts = ReadOptions(num_threads=16, prefetch_buffer_size=1)
-    train_sampler = IndexSampler(len(train_ds), shard_opts, shuffle=True, seed=42)
-    val_sampler = IndexSampler(len(val_ds), shard_opts, shuffle=True, seed=39)
+    train_sampler = IndexSampler(len(train_ds), shard_opts, shuffle=True, seed=SEED)
+    val_sampler = IndexSampler(len(val_ds), shard_opts, shuffle=True, seed=SEED)
+    test_sampler = IndexSampler(len(test_ds), shard_opts, shuffle=True, seed=SEED)
     train_dl = DataLoader(data_source=train_ds,
             sampler=train_sampler,
             worker_count=4,
@@ -258,7 +258,14 @@ def main(args):
             shard_options=shard_opts,
             read_options=read_opts,
             operations=[Batch(batch_size=batch_size, drop_remainder=False)])
-    key = random.key(0)
+    test_dl = DataLoader(data_source=test_ds,
+            sampler=test_sampler,
+            worker_count=4,
+            shard_options=shard_opts,
+            read_options=read_opts,
+            operations=[Batch(batch_size=batch_size, drop_remainder=False)])
+    key = random.key(SEED)
+    key, init_key = random.split(key)
 
     # Setup state
     if args.load is not None:
@@ -268,10 +275,10 @@ def main(args):
     else:
         x,y = next(iter(train_dl))
         if args.baseline:
-            initial_params = module.init(key, x)
+            initial_params = module.init(init_key, x)
         else:
             dummy_time = jnp.array([0.0])
-            initial_params = module.init(key, x, time=dummy_time, condition=y)
+            initial_params = module.init(init_key, x, time=dummy_time, condition=y)
 
         initial_opt_state = opt.init(initial_params)
         state = TrainingState(initial_params, initial_opt_state, None, key)
@@ -309,10 +316,9 @@ def main(args):
                         img = random.normal(subkey, (b, 256, 256, 1))
                         y_hat_scaled, process = sample(params=state.params, key=key, img=img, condition=x_scaled)
                     
-                    mse = jnp.mean(jnp.square(y_scaled - y_hat_scaled))
-                    mae = jnp.mean(jnp.abs(y_scaled - y_hat_scaled))
-                    
                     y_hat = jnp.clip((y_hat_scaled+1)*0.5, 0, 1)
+                    mse = jnp.mean(jnp.square(y - y_hat))
+                    mae = jnp.mean(jnp.abs(y - y_hat))
                     ssim = jnp.mean(pix.ssim(y_hat, y))
                     psnr = jnp.mean(pix.psnr(y_hat, y))
 
@@ -337,41 +343,15 @@ def main(args):
         batch_size = x.shape[0]
         key, subkey = random.split(key, 2)
         img = random.normal(subkey, (batch_size, 256, 256, 1))
-        y_hat, process = sample(params=state.params, key=key, img=img, condition=x)
+        if args.baseline:
+            y_hat = module.apply(state.params, x)
+        else:
+            y_hat, _ = sample(params=state.params, key=key, img=img, condition=x)
 
         samples = jnp.concatenate((x,y,y_hat), axis=0)
         samples = jnp.clip((samples+1) * 0.5, 0., 1.)
         samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
         utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=False, padding=1, pad_value=1.0), "out.png")
-
-        process = jnp.clip((process+1) * 0.5, 0., 1.)
-        #process = rearrange(process, "t b h w c -> b t h w c")
-        #process = process[0]
-
-        #process = np.array(process).reshape(-1, 1, 256, 256)
-        #process = torch.from_numpy(np.array(process)).reshape(-1, 1, 256, 256)
-        #utils.save_image(utils.make_grid(process, nrow=25, normalize=False, padding=1, pad_value=1.0), "process.png")
-
-        def image_grid(imgs, rows, cols):
-            assert len(imgs) == rows*cols
-            w, h = imgs[0].size
-            grid = Image.new('L', size=(cols*w, rows*h))
-            grid_w, grid_h = grid.size
-            for i, img in enumerate(imgs):
-                grid.paste(img, box=(i%cols*w, i//cols*h))
-            return grid
-
-        process = np.array(process)
-        print(process.shape)
-
-        from PIL import Image
-        imgs = []
-        for t in range(process.shape[0]):
-            time_img = process[t]
-            sub_images = [Image.fromarray((time_img[i].reshape(256, 256) * 255).astype(np.uint8)) for i in range(time_img.shape[0])]
-            imgs.append(image_grid(sub_images, 4, 4))
-
-        imgs[0].save("out.gif", save_all=True, append_images=imgs[1:], duration=50, loop=0)
 
 
 if __name__ == "__main__":
@@ -386,11 +366,10 @@ if __name__ == "__main__":
     p.add_argument("--log_every_n_steps", type=int, default=20, help="log the metrics every n steps")
     p.add_argument("--min_snr_gamma", type=float, default=5.0, help="set loss weighting for min snr")
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
-    p.add_argument("--arch", type=str, choices=["unet", "dit", "uvit"], default="unet", help="which architecture to use")
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "dit", "uvit"], default="adm", help="which architecture to use")
     p.add_argument("--batch_size", type=int, default=16, help="batch size")
     p.add_argument("--objective", type=str, default="v", choices=["v", "eps", "start"], help="diffusion objective")
     p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
     p.add_argument("--baseline", action="store_true", help="use unet baseline")
-    p.add_argument("--grad_clip", action="store_true", help="use gradient clipping")
     p.add_argument("--disable_minsnr", action="store_true", help="disable min snr loss weighting")
     main(p.parse_args())

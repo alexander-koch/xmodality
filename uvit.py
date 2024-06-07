@@ -275,6 +275,7 @@ class UViT(nn.Module):
     channels: int = 1
     vit_num_heads: int = 4
     vit_depth: int = 16
+    num_heads: int = 4
     #patch_size: Union[int, tuple[int, int]] = 4
     dtype: Any = jnp.float32
 
@@ -354,31 +355,30 @@ class UViT(nn.Module):
                 time_emb_dim=time_emb_dim,
                 dtype=self.dtype,
             )(x, time_embed)
+            h.append(x)
+
             x = ResNetBlock(
                 dim=dim_out,
                 dim_out=dim_out,
                 time_emb_dim=time_emb_dim,
                 dtype=self.dtype,
             )(x, time_embed)
+            x_hat = nn.RMSNorm()(x)
+            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
+                    kernel_init=nn.initializers.glorot_uniform(),
+                    bias_init=nn.initializers.zeros,
+                    dtype=self.dtype)(x_hat)
+            x = x + x_hat
             h.append(x)
 
             if not is_last:
                 x = PixelShuffleDownsample(dim=dim_out, dtype=self.dtype)(x)
-        
+
         # Transformer middle part
         mid_dim = dims[-1]
         img_h, img_w, c = x.shape[1], x.shape[2], x.shape[3]
         seq_len = img_h * img_w
         x = rearrange(x, "b h w c -> b (h w) c")
-
-        #x = nn.LayerNorm()(x)
-        #x = nn.Dense(features=mid_dim, kernel_init=nn.initializers.glorot_uniform(), bias_init=nn.initializers.zeros, dtype=self.dtype)(x)
-        #x = nn.LayerNorm()(x)
-
-        #pos_emb_init = nn.initializers.truncated_normal(stddev=0.02)
-        #pos_emb_shape = (1, seq_len, mid_dim)
-        #pos_emb = self.param("pos_emb", pos_emb_init, pos_emb_shape, self.dtype)
-        #x = x + pos_emb
         pos_emb = sinusoidal_embedding_2d(img_h, img_w, c)
         x = x + pos_emb
 
@@ -392,7 +392,6 @@ class UViT(nn.Module):
         )(x, time_embed)
         x = rearrange(x, "b (h w) c -> b h w c", h=img_h, w=img_w)
 
-        # Upsampling
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             h_l = h.pop()
             x = jnp.concatenate((x, h_l), axis=-1)
@@ -404,12 +403,21 @@ class UViT(nn.Module):
                 time_emb_dim=time_emb_dim,
                 dtype=self.dtype,
             )(x, time_embed)
+
+            h_l = h.pop()
+            x = jnp.concatenate((x, h_l), axis=-1)
             x = ResNetBlock(
                 dim=dim_in,
                 dim_out=dim_in,
                 time_emb_dim=time_emb_dim,
                 dtype=self.dtype,
             )(x, time_embed)
+            x_hat = nn.RMSNorm()(x)
+            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
+                    kernel_init=nn.initializers.glorot_uniform(),
+                    bias_init=nn.initializers.zeros,
+                    dtype=self.dtype)(x_hat)
+            x = x + x_hat
 
             if not is_last:
                 x = PixelShuffleUpsample(dim=dim_in, dtype=self.dtype)(x)
