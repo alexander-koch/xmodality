@@ -5,6 +5,7 @@ import nibabel as nib
 from typing import Any
 from functools import reduce
 from tqdm import tqdm
+from nilearn.masking import compute_background_mask, apply_mask
 
 THRESHOLD = 200
 DICE_OVERLAP = 0.3
@@ -40,13 +41,21 @@ class MultiModalDataset:
             src = self.last_source
         else:
             img = nib.load(src_path).get_fdata().astype(np.float32)
-
+            
             # Src transform
-            max_v = np.quantile(img, 0.999)
+            #max_v = np.quantile(img, 0.999)
             #min_v = np.quantile(img, 0.01)
-            min_v = 0
-            img = img.clip(min_v, max_v)
-            img = (img - min_v) / (max_v - min_v)
+            #max_v = img.max()
+            #min_v = img.min()
+            #img = (img - min_v) / (max_v - min_v)
+
+            #img = np.maximum(0, img)
+            #max_v = np.quantile(img, 0.999)
+            #img = img.clip(0, max_v) / max_v
+
+            mu = img.mean()
+            sigma = img.std()
+            img = (img - mu) / sigma
 
             self.last_source = img
             self.last_source_path = src_path
@@ -58,7 +67,7 @@ class MultiModalDataset:
             img = nib.load(tgt_path).get_fdata().astype(np.float32)
             
             # Tgt transform
-            img = (np.clip(img, -50, 350) + 50) / 400
+            #img = (np.clip(img, -50, 350) + 50) / 400
 
             self.last_target = img
             self.last_target_path = tgt_path
@@ -85,6 +94,13 @@ def write_ds(ds, prefix):
         src, tgt = ds[i]
         if src.sum() == 0 or tgt.sum() == 0:
             continue
+
+        #if i > 80:
+        #    import matplotlib.pyplot as plt
+        #    plt.imshow(src, cmap="gray")
+        #    plt.savefig("out.png")
+        #    import sys
+        #    sys.exit(0)
     
         # Only pick slices with sufficient similarity/overlap
         src_mask = (src > 0).astype(np.float32)
@@ -95,6 +111,7 @@ def write_ds(ds, prefix):
 
         if dice_overlap < DICE_OVERLAP or num_src_pixels < THRESHOLD or num_tgt_pixels < THRESHOLD:
             continue
+
         np.savez_compressed(f"data/{prefix}_{i}.npz", src=src, tgt=tgt)
 
 def main():

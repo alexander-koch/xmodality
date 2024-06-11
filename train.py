@@ -12,6 +12,7 @@ import argparse
 import wandb
 import dm_pix as pix
 from glob import glob
+import yaml
 
 import torch
 from torch.utils.data import Dataset
@@ -79,11 +80,11 @@ def p_sample(module, params, key, x, time, time_next, objective="v", **kwargs):
     noise = random.normal(key, x.shape)
     return jax.lax.cond(time_next == 0, lambda m: m, lambda m: m + jnp.sqrt(posterior_variance) * noise, model_mean)
 
-
 class SliceDS(Dataset):
-    def __init__(self, paths, rng):
+    def __init__(self, paths, rng, crop=True):
         self.paths = paths
         self.rng = rng
+        self.crop = crop
 
     def __len__(self):
         return len(self.paths)
@@ -93,21 +94,28 @@ class SliceDS(Dataset):
         src_slice = item["src"]
         tgt_slice = item["tgt"]
 
-        h = src_slice.shape[0]
-        w = src_slice.shape[1]
-        pad_h = 256 - h if h < 256 else 0
-        pad_w = 256 - w if w < 256 else 0
-        if pad_h > 0 or pad_w > 0:
-            src_slice = np.pad(src_slice, ((0,pad_h), (0, pad_w)))
-            tgt_slice = np.pad(tgt_slice, ((0,pad_h), (0, pad_w)))
+        tgt_slice = (np.clip(tgt_slice, -50, 350) + 50) / 400
+
+        min_v, max_v = src_slice.min(), src_slice.max()
+        src_slice = src_slice.clip(min_v, max_v)
+        src_slice = (src_slice - min_v) / (max_v - min_v)
+
+        if self.crop:
             h = src_slice.shape[0]
             w = src_slice.shape[1]
+            pad_h = 256 - h if h < 256 else 0
+            pad_w = 256 - w if w < 256 else 0
+            if pad_h > 0 or pad_w > 0:
+                src_slice = np.pad(src_slice, ((0,pad_h), (0, pad_w)))
+                tgt_slice = np.pad(tgt_slice, ((0,pad_h), (0, pad_w)))
+                h = src_slice.shape[0]
+                w = src_slice.shape[1]
 
-        x = self.rng.integers(0, h-256) if h-256 > 0 else 0
-        y = self.rng.integers(0, w-256) if w-256 > 0 else 0
+            x = self.rng.integers(0, h-256) if h-256 > 0 else 0
+            y = self.rng.integers(0, w-256) if w-256 > 0 else 0
 
-        src_slice = src_slice[x:x+256, y:y+256]
-        tgt_slice = tgt_slice[x:x+256, y:y+256]
+            src_slice = src_slice[x:x+256, y:y+256]
+            tgt_slice = tgt_slice[x:x+256, y:y+256]
 
         src_slice = np.expand_dims(src_slice, -1)
         tgt_slice = np.expand_dims(tgt_slice, -1)
@@ -129,15 +137,24 @@ def sample(module, params, key, img, num_sample_steps=100, **kwargs):
     img = jnp.clip(img, -1, 1)
     return img
 
+def slow_sample(module, params, key, img, num_sample_steps=100, **kwargs):
+    steps = jnp.linspace(1.0, 0.0, num_sample_steps+1)
+    keys = random.split(key, num_sample_steps)
+    for i in tqdm(range(num_sample_steps)):
+        time = steps[i]
+        time_next = steps[i+1]
+        img = p_sample(module, params, keys[i], img, time, time_next, **kwargs)
+    
+    img = jnp.clip(img, -1, 1)
+    return img
+
 def augment(batch, key):
     lrkey, udkey = random.split(key)
     x,y = batch
     both = jnp.concatenate((x,y), axis=-1)
     batch_size = x.shape[0]
-
     lr_prob = random.bernoulli(key=lrkey, shape=(batch_size,1,1,1))
     ud_prob = random.bernoulli(key=udkey, shape=(batch_size,1,1,1))
-
     both = both * lr_prob + (1-lr_prob) * jnp.flip(both, -2)
     both = both * ud_prob + (1-ud_prob) * jnp.flip(both, -3)
     return jnp.split(both, 2, axis=-1)
@@ -241,7 +258,7 @@ def main(args):
 
     train_ds = SliceDS(train_paths, rng=rng)
     val_ds = SliceDS(val_paths, rng=rng)
-    test_ds = SliceDS(test_paths, rng=rng)
+    test_ds = SliceDS(test_paths, rng=rng, crop=True)
 
     batch_size = int(args.batch_size)
 
@@ -297,10 +314,18 @@ def main(args):
 
         train_dl = cycle(train_dl)
         for step in (p := tqdm(range(total_steps))):
-            key, updatekey, augmentkey = random.split(key, 3)
+            key, updatekey = random.split(key)
 
             batch = next(train_dl)
-            batch = augment(batch, augmentkey)
+            #batch = augment(batch, augmentkey)
+            #x,y = batch
+            #print("x:", x.min(), x.max(), x.mean(), x.std())
+            #print("y:", y.min(), y.max(), y.mean(), y.std())
+            #samples = jnp.concatenate((x,y), axis=0)
+            #samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
+            #utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=True, padding=1, pad_value=1.0), "out.png")
+            #import sys
+            #sys.exit(0)
 
             state = update(state, batch, updatekey)
             p.set_description(f"train_loss: {state.train_loss}")
@@ -315,7 +340,6 @@ def main(args):
                 for name, dl in zip(names, dls):
                     x,y = next(iter(dl))
                     x_scaled = x * 2 - 1
-                    y_scaled = y * 2 - 1
 
                     if args.baseline:
                         y_hat_scaled = module.apply(state.params, x_scaled)
@@ -355,13 +379,58 @@ def main(args):
         else:
             key, initkey, samplekey = random.split(key, 3)
             img = random.normal(initkey, (batch_size, 256, 256, 1))
-            y_hat = sample(module=module, params=state.params, key=samplekey, img=img, condition=x)
+            y_hat = sample(module=module, params=state.params, key=samplekey, img=img, condition=x, num_sample_steps=100)
 
         samples = jnp.concatenate((x,y,y_hat), axis=0)
         samples = jnp.clip((samples+1) * 0.5, 0., 1.)
         samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
         utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=False, padding=1, pad_value=1.0), "out.png")
 
+    elif args.evaluate:
+        metric_list = []
+
+        test_length = math.ceil(len(test_ds) / batch_size)
+        it = iter(test_dl)
+        for i in tqdm(range(test_length)):
+            x,y = next(it)
+            x = x * 2 - 1
+            batch_size, h, w, _= x.shape
+
+            if args.baseline:
+                y_hat_scaled = module.apply(state.params, x)
+            else:
+                key, initkey, samplekey = random.split(key, 3)
+                img = random.normal(initkey, (batch_size,h,w,1))
+                y_hat_scaled = sample(module=module, params=state.params, key=samplekey, img=img, condition=x, num_sample_steps=100)
+
+            y_hat = jnp.clip((y_hat_scaled+1)*0.5, 0, 1)
+            mse = jnp.mean(jnp.square(y - y_hat))
+            mae = jnp.mean(jnp.abs(y - y_hat))
+            ssim = jnp.mean(pix.ssim(y_hat, y))
+            psnr = jnp.mean(pix.psnr(y_hat, y))
+
+            metrics = {
+                "mse": mse,
+                "mae": mae,
+                "ssim": ssim,
+                "psnr": psnr
+            }
+
+            metric_list.append(metrics)
+
+        mse = jnp.mean(jnp.stack([m["mse"] for m in metric_list]))
+        mae= jnp.mean(jnp.stack([m["mae"] for m in metric_list]))
+        ssim = jnp.mean(jnp.stack([m["ssim"] for m in metric_list]))
+        psnr = jnp.mean(jnp.stack([m["psnr"] for m in metric_list]))
+
+        metrics = {
+            "mse": mse.item(),
+            "mae": mae.item(),
+            "ssim": ssim.item(),
+            "psnr": psnr.item()
+        }
+        with open("metrics.yaml", "w") as f:
+            yaml.dump(metrics, f)
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(
@@ -370,6 +439,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from")
     p.add_argument("--save", type=str, help="path to save weight to", default="checkpoint.pkl")
     p.add_argument("--train", action="store_true", help="train the model")
+    p.add_argument("--evaluate", action="store_true", help="evaluate the model on the test set")
     p.add_argument("--sample", action="store_true", help="sample the model")
     p.add_argument("--validate_every_n_steps", type=int, default=1000, help="validate the model every n steps")
     p.add_argument("--log_every_n_steps", type=int, default=20, help="log the metrics every n steps")

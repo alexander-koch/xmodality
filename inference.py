@@ -1,5 +1,5 @@
 import jax
-from jax import random
+from jax import random, vmap
 import jax.numpy as jnp
 import pickle
 from uvit import UViT
@@ -12,36 +12,22 @@ import math
 from einops import rearrange
 
 def transform(img):
-    img = np.maximum(0, img)
-    max_v = np.quantile(img, 0.999)
-    return img / max_v
+    #img = np.maximum(0, img)
+    #max_v = np.quantile(img, 0.999)
+    #return img / max_v
+    
+    min_v = img.min()
+    max_v = img.max()
+    return (img - min_v) / (max_v - min_v)
+
+def vmap_transform(img):
+    return vmap(transform)(img)
 
 def main():
-    #dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
-    #dtype = jnp.float32
     dtype = jnp.bfloat16
     module = UViT(dim=128, channels=1, dtype=dtype)
-    with open("old_weights/uvit.pkl", "rb") as f:
+    with open("weights/uvit.pkl", "rb") as f:
         state = pickle.load(f)
-
-    #path = "/fast/work/users/kochal_c/modality_data/final/topcow_mr_whole_016_0000_Warped.nii.gz"
-    #tof_brain = nib.load(path).get_fdata().astype(np.float32)
-    #tof_brain_slice = transform(tof_brain[:256, :256, 80]) * 2 - 1
-    #tof_brain_slice = jnp.expand_dims(tof_brain_slice, (0, -1))
-    #print("tof_brain_slice:", tof_brain_slice.shape)
-
-    #key = random.key(0)
-    #key, subkey = random.split(key, 2)
-    #img = random.normal(subkey, (1, 256, 256, 1))
-    #out = sample(module=module, params=state.params, key=key, img=img, condition=tof_brain_slice, num_sample_steps=50)
-    #out = (out + 1) * 0.5
-    #
-    ## Plot
-    #out = np.array(out).reshape(256, 256)
-    #fig,ax = plt.subplots(1,2)
-    #ax[0].imshow(np.array(tof_brain_slice).reshape(256, 256), cmap="gray")
-    #ax[1].imshow(out, cmap="gray")
-    #plt.savefig("out.png")
 
     path = "/fast/work/users/kochal_c/modality_data/final/topcow_mr_whole_016_0000_Warped.nii.gz"
     out_path = "test.nii.gz"
@@ -50,6 +36,7 @@ def main():
     header, affine = tof_brain.header, tof_brain.affine
             
     tof_brain = jnp.array(tof_brain.get_fdata().astype(np.float32))
+    #tof_brain = vmap_transform(tof_brain) * 2 - 1
     tof_brain = transform(tof_brain) * 2 - 1
     tof_brain = rearrange(tof_brain, "h w b -> b h w 1")
     print("tof_brain:", tof_brain.shape, tof_brain.min(), tof_brain.max())
@@ -92,5 +79,12 @@ def main():
     nib.save(img, out_path)
 
 if __name__ == "__main__":
+    #p = argparse.ArgumentParser(
+    #    description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    #)
+    #p.add_argument("--load", type=str, help="path to load pretrained weights from")
+    #p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
+    #p.add_argument("--input", type=str, help="path to image or list of images")
+    #p.add_argument("--output", type=str, help="output path")
+    #main(p.parse_args())
     main()
-    
