@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+
+"""Trains and evaluates a cross-modality diffusion model."""
+
 import jax
 from jax import jit, random, numpy as jnp
 import numpy as np

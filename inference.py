@@ -1,13 +1,15 @@
+#!/usr/bin/env python3
+
+"""Performs inference on a cross-modality diffusion model."""
+
 import jax
 from jax import random, vmap
 import jax.numpy as jnp
 import pickle
-from uvit import UViT
-from adm import ADM
-from unet import UNet
+from models import UViT, ADM, UNet
 import numpy as np
 import matplotlib.pyplot as plt
-from train import sample
+from sampling import ddpm_sample
 import nibabel as nib
 from tqdm import tqdm
 import math
@@ -33,6 +35,7 @@ def main(args):
         module = UViT(dim=128, channels=1, dtype=dtype)
     elif args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
+    else:
         raise NotImplementedError()
     assert args.load.endswith(".pkl")
     print(args)
@@ -52,7 +55,7 @@ def run(module, params, use_diffusion, path, out_path, batch_size):
     tof_brain = jnp.array(tof_brain.get_fdata().astype(np.float32))
     tof_brain = rearrange(tof_brain, "h w b -> b h w 1")
     tof_brain = vmap_transform(tof_brain) * 2 - 1
-    print("tof_brain:", tof_brain.shape, tof_brain.min(), tof_brain.max())
+    print("tof_brain (rescaled):", tof_brain.shape, tof_brain.min(), tof_brain.max())
     num_slices, h, w, _ = tof_brain.shape
 
     # Padding
@@ -81,7 +84,7 @@ def run(module, params, use_diffusion, path, out_path, batch_size):
         tof_brain_slices = tof_brain[start:end]
 
         if use_diffusion:
-            out = sample(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=100)
+            out = ddpm_sample(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=100)
         else:
             out = module.apply(params, tof_brain_slices)
         out_slices.append(out)
@@ -99,10 +102,10 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    p.add_argument("--load", type=str, help="path to load pretrained weights from")
+    p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
-    p.add_argument("--input", type=str, help="path to image or list of images")
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit"], help="architecture")
+    p.add_argument("--input", type=str, help="path to image or list of images", required=True)
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit"], help="architecture", required=True)
     p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")
