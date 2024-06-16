@@ -12,140 +12,27 @@ import yaml
 from typing import NamedTuple
 from tqdm import tqdm
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
-from einops import reduce, repeat
+from einops import reduce
 from functools import partial
 import cloudpickle
 import pickle
-from jax_tqdm import loop_tqdm
 import utils
+from sampling import q_sample, ddpm_sample, right_pad_dims_to
+from dataset import SliceDS
 import os
-os.environ['XLA_FLAGS'] = ("--xla_gpu_deterministic_ops=true")
 
-def logsnr_schedule_cosine(t: jax.Array, logsnr_min: float =-15, logsnr_max: float =15) -> jax.Array:
-    t_min = math.atan(math.exp(-0.5 * logsnr_max))
-    t_max = math.atan(math.exp(-0.5 * logsnr_min))
-    return -2 * jnp.log(jnp.tan(t_min + t * (t_max - t_min)))
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
-def right_pad_dims_to(x: jax.Array, t: jax.Array) -> jax.Array:
-    padding_dims = x.ndim - t.ndim
-    if padding_dims <= 0:
-        return t
-    return t.reshape(*t.shape, *((1,) * padding_dims))
-
-def q_sample(x_start: jax.Array, times: jax.Array, noise: jax.Array):
-    log_snr = logsnr_schedule_cosine(times)
-    log_snr_padded = right_pad_dims_to(x_start, log_snr)
-    alpha, sigma = jnp.sqrt(jax.nn.sigmoid(log_snr_padded)), jnp.sqrt(jax.nn.sigmoid(-log_snr_padded))
-    x_noised = x_start * alpha + noise * sigma
-    return x_noised, log_snr
- 
-def p_sample(module, params, key, x, time, time_next, objective="v", **kwargs):
-    log_snr = logsnr_schedule_cosine(time)
-    log_snr_next = logsnr_schedule_cosine(time_next)
-    c = -jnp.expm1(log_snr - log_snr_next)
-
-    squared_alpha, squared_alpha_next = jax.nn.sigmoid(log_snr), jax.nn.sigmoid(log_snr_next)
-    squared_sigma, squared_sigma_next = jax.nn.sigmoid(-log_snr), jax.nn.sigmoid(-log_snr_next)
-
-    alpha, sigma, alpha_next = map(
-        jnp.sqrt, (squared_alpha, squared_sigma, squared_alpha_next)
-    )
-
-    batch_log_snr = repeat(log_snr, " -> b", b=x.shape[0])
-    pred = module.apply(params, x, time=batch_log_snr, **kwargs)
-
-    if objective == "v":
-        x_start = alpha * x - sigma * pred
-    elif objective == "eps":
-        x_start = (x - sigma * pred) / alpha
-    elif objective == "start":
-        x_start = pred
-
-    x_start = jnp.clip(x_start, -1, 1)
-
-    model_mean = alpha_next * (x * (1 - c) / alpha + c * x_start)
-    posterior_variance = squared_sigma_next * c
-
-    noise = random.normal(key, x.shape)
-    return jax.lax.cond(time_next == 0, lambda m: m, lambda m: m + jnp.sqrt(posterior_variance) * noise, model_mean)
-
-class SliceDS:
-    def __init__(self, paths, rng, crop=True):
-        self.paths = paths
-        self.rng = rng
-        self.crop = crop
-
-    def __len__(self):
-        return len(self.paths)
-
-    def __getitem__(self, index):
-        item = np.load(self.paths[index])
-        src_slice = item["src"]
-        tgt_slice = item["tgt"]
-
-        tgt_slice = (np.clip(tgt_slice, -50, 350) + 50) / 400
-
-        min_v, max_v = src_slice.min(), src_slice.max()
-        src_slice = src_slice.clip(min_v, max_v)
-        src_slice = (src_slice - min_v) / (max_v - min_v)
-
-        if self.crop:
-            h = src_slice.shape[0]
-            w = src_slice.shape[1]
-            pad_h = 256 - h if h < 256 else 0
-            pad_w = 256 - w if w < 256 else 0
-            if pad_h > 0 or pad_w > 0:
-                src_slice = np.pad(src_slice, ((0,pad_h), (0, pad_w)))
-                tgt_slice = np.pad(tgt_slice, ((0,pad_h), (0, pad_w)))
-                h = src_slice.shape[0]
-                w = src_slice.shape[1]
-
-            x = self.rng.integers(0, h-256) if h-256 > 0 else 0
-            y = self.rng.integers(0, w-256) if w-256 > 0 else 0
-
-            src_slice = src_slice[x:x+256, y:y+256]
-            tgt_slice = tgt_slice[x:x+256, y:y+256]
-
-        src_slice = np.expand_dims(src_slice, -1)
-        tgt_slice = np.expand_dims(tgt_slice, -1)
-
-        return src_slice, tgt_slice
-
-@partial(jit, static_argnums=(0,4))
-def sample(module, params, key, img, num_sample_steps=100, **kwargs):
-    steps = jnp.linspace(1.0, 0.0, num_sample_steps+1)
-    keys = random.split(key, num_sample_steps)
-
-    @loop_tqdm(n=num_sample_steps, desc="sampling step")
-    def step(i, img):
-        time = steps[i]
-        time_next = steps[i+1]
-        return p_sample(module, params, keys[i], img, time, time_next, **kwargs)
-    
-    img = jax.lax.fori_loop(0, num_sample_steps, step, img)
-    img = jnp.clip(img, -1, 1)
-    return img
-
-def slow_sample(module, params, key, img, num_sample_steps=100, **kwargs):
-    steps = jnp.linspace(1.0, 0.0, num_sample_steps+1)
-    keys = random.split(key, num_sample_steps)
-    for i in tqdm(range(num_sample_steps)):
-        time = steps[i]
-        time_next = steps[i+1]
-        img = p_sample(module, params, keys[i], img, time, time_next, **kwargs)
-    
-    img = jnp.clip(img, -1, 1)
-    return img
 
 def augment(batch, key):
     lrkey, udkey = random.split(key)
-    x,y = batch
-    both = jnp.concatenate((x,y), axis=-1)
+    x, y = batch
+    both = jnp.concatenate((x, y), axis=-1)
     batch_size = x.shape[0]
-    lr_prob = random.bernoulli(key=lrkey, shape=(batch_size,1,1,1))
-    ud_prob = random.bernoulli(key=udkey, shape=(batch_size,1,1,1))
-    both = both * lr_prob + (1-lr_prob) * jnp.flip(both, -2)
-    both = both * ud_prob + (1-ud_prob) * jnp.flip(both, -3)
+    lr_prob = random.bernoulli(key=lrkey, shape=(batch_size, 1, 1, 1))
+    ud_prob = random.bernoulli(key=udkey, shape=(batch_size, 1, 1, 1))
+    both = both * lr_prob + (1 - lr_prob) * jnp.flip(both, -2)
+    both = both * ud_prob + (1 - ud_prob) * jnp.flip(both, -3)
     return jnp.split(both, 2, axis=-1)
 
 
@@ -155,22 +42,26 @@ class TrainingState(NamedTuple):
     train_loss: jax.Array
     ema_params: dict
 
-SEED = 42
 
 def main(args):
-    dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
-    print("dtype:", dtype)
     print("config:", args)
+    dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     batch_size = int(args.batch_size)
     use_ema = args.ema_decay > 0
-    total_steps = 150000
 
     if args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
     elif args.arch == "adm":
         module = ADM(dim=128, channels=1, dtype=dtype)
     elif args.arch == "dit":
-        module = DiT(patch_size=4, hidden_size=1024, depth=16, num_heads=16, in_channels=1, dtype=dtype)
+        module = DiT(
+            patch_size=4,
+            hidden_size=1024,
+            depth=16,
+            num_heads=16,
+            in_channels=1,
+            dtype=dtype,
+        )
     elif args.arch == "uvit":
         module = UViT(dim=128, channels=1, dtype=dtype)
     else:
@@ -179,7 +70,7 @@ def main(args):
     if args.wandb:
         wandb.init(project="xmodality_paper", config=args)
 
-    rng = np.random.default_rng(SEED)
+    rng = np.random.default_rng(args.seed)
     opt = optax.adam(learning_rate=1e-4)
 
     def base_loss(params, batch, keys):
@@ -232,8 +123,14 @@ def main(args):
         loss = (loss * loss_weight).mean()
         return loss
 
-    loss_fn = base_loss if args.baseline else partial(diff_loss, objective=args.objective, use_minsnr=not args.disable_minsnr)
-    
+    loss_fn = (
+        base_loss
+        if args.baseline
+        else partial(
+            diff_loss, objective=args.objective, use_minsnr=not args.disable_minsnr
+        )
+    )
+
     @jit
     def update(state, batch, key):
         keys = random.split(key, 2)
@@ -243,11 +140,18 @@ def main(args):
 
         if use_ema:
             # params * (1-decay) + ema * decay
-            ema_params = optax.incremental_update(params, state.ema_params, step_size=1-args.ema_decay)
+            ema_params = optax.incremental_update(
+                params, state.ema_params, step_size=1 - args.ema_decay
+            )
         else:
             ema_params = params
 
-        return TrainingState(params=params, opt_state=opt_state, train_loss=train_loss_value, ema_params=ema_params)
+        return TrainingState(
+            params=params,
+            opt_state=opt_state,
+            train_loss=train_loss_value,
+            ema_params=ema_params,
+        )
 
     train_paths = sorted(list(glob("data/train*.npz")))
     val_paths = sorted(list(glob("data/val*.npz")))
@@ -255,33 +159,41 @@ def main(args):
 
     train_ds = SliceDS(train_paths, rng=rng)
     val_ds = SliceDS(val_paths, rng=rng)
-    test_ds = SliceDS(test_paths, rng=rng, crop=True)
+    test_ds = SliceDS(test_paths, rng=rng)
 
     # Setup dataloaders
     shard_opts = ShardOptions(0, 1)
     read_opts = ReadOptions(num_threads=16, prefetch_buffer_size=1)
-    train_sampler = IndexSampler(len(train_ds), shard_opts, shuffle=True, seed=SEED)
-    val_sampler = IndexSampler(len(val_ds), shard_opts, shuffle=True, seed=SEED)
-    test_sampler = IndexSampler(len(test_ds), shard_opts, shuffle=True, seed=SEED)
-    train_dl = DataLoader(data_source=train_ds,
-            sampler=train_sampler,
-            worker_count=4,
-            shard_options=shard_opts,
-            read_options=read_opts,
-            operations=[Batch(batch_size=batch_size, drop_remainder=False)])
-    val_dl = DataLoader(data_source=val_ds,
-            sampler=val_sampler,
-            worker_count=4,
-            shard_options=shard_opts,
-            read_options=read_opts,
-            operations=[Batch(batch_size=batch_size, drop_remainder=False)])
-    test_dl = DataLoader(data_source=test_ds,
-            sampler=test_sampler,
-            worker_count=4,
-            shard_options=shard_opts,
-            read_options=read_opts,
-            operations=[Batch(batch_size=batch_size, drop_remainder=False)])
-    key = random.key(SEED)
+    train_sampler = IndexSampler(
+        len(train_ds), shard_opts, shuffle=True, seed=args.seed
+    )
+    val_sampler = IndexSampler(len(val_ds), shard_opts, shuffle=True, seed=args.seed)
+    test_sampler = IndexSampler(len(test_ds), shard_opts, shuffle=True, seed=args.seed)
+    train_dl = DataLoader(
+        data_source=train_ds,
+        sampler=train_sampler,
+        worker_count=4,
+        shard_options=shard_opts,
+        read_options=read_opts,
+        operations=[Batch(batch_size=batch_size, drop_remainder=False)],
+    )
+    val_dl = DataLoader(
+        data_source=val_ds,
+        sampler=val_sampler,
+        worker_count=4,
+        shard_options=shard_opts,
+        read_options=read_opts,
+        operations=[Batch(batch_size=batch_size, drop_remainder=False)],
+    )
+    test_dl = DataLoader(
+        data_source=test_ds,
+        sampler=test_sampler,
+        worker_count=4,
+        shard_options=shard_opts,
+        read_options=read_opts,
+        operations=[Batch(batch_size=batch_size, drop_remainder=False)],
+    )
+    key = random.key(args.seed)
     key, initkey = random.split(key)
 
     # Setup state
@@ -290,7 +202,7 @@ def main(args):
             state = pickle.load(f)
         print("train loss:", state.train_loss)
     else:
-        x,y = next(iter(train_dl))
+        x, y = next(iter(train_dl))
         if args.baseline:
             initial_params = module.init(initkey, x)
         else:
@@ -298,16 +210,16 @@ def main(args):
             initial_params = module.init(initkey, x, time=dummy_time, condition=y)
 
         initial_opt_state = opt.init(initial_params)
-        state = TrainingState(params=initial_params, opt_state=initial_opt_state, train_loss=None, ema_params=initial_params)
+        state = TrainingState(
+            params=initial_params,
+            opt_state=initial_opt_state,
+            train_loss=None,
+            ema_params=initial_params,
+        )
 
     if args.train:
-        #num_epochs = 200
-        #train_length = math.ceil(len(train_ds) / batch_size)
-        #total_steps = train_length * num_epochs
-        print("total_steps:", total_steps)
-
         train_dl = utils.cycle(train_dl)
-        for step in (p := tqdm(range(total_steps))):
+        for step in (p := tqdm(range(args.total_steps))):
             key, updatekey = random.split(key)
 
             batch = next(train_dl)
@@ -315,27 +227,29 @@ def main(args):
                 key, augmentkey = random.split(key)
                 batch = augment(batch, augmentkey)
 
-            #x,y = batch
-            #print("x:", x.min(), x.max(), x.mean(), x.std())
-            #print("y:", y.min(), y.max(), y.mean(), y.std())
-            #samples = jnp.concatenate((x,y), axis=0)
-            #samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
-            #utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=True, padding=1, pad_value=1.0), "out.png")
-            #import sys
-            #sys.exit(0)
+            # x,y = batch
+            # print("x:", x.min(), x.max(), x.mean(), x.std())
+            # print("y:", y.min(), y.max(), y.mean(), y.std())
+            # samples = jnp.concatenate((x,y), axis=0)
+            # samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
+            # utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=True, padding=1, pad_value=1.0), "out.png")
+            # import sys
+            # sys.exit(0)
 
             state = update(state, batch, updatekey)
             p.set_description(f"train_loss: {state.train_loss}")
 
-            if args.wandb and (step % args.log_every_n_steps == args.log_every_n_steps-1):
+            if args.wandb and (
+                step % args.log_every_n_steps == args.log_every_n_steps - 1
+            ):
                 wandb.log({"train_loss": state.train_loss}, step=step)
 
-            if step % args.validate_every_n_steps == args.validate_every_n_steps-1:
+            if step % args.validate_every_n_steps == args.validate_every_n_steps - 1:
                 names = ["train", "val"]
                 dls = [train_dl, val_dl]
                 log = {}
                 for name, dl in zip(names, dls):
-                    x,y = next(iter(dl))
+                    x, y = next(iter(dl))
                     x_scaled = x * 2 - 1
 
                     params = state.ema_params if use_ema else state.params
@@ -345,9 +259,15 @@ def main(args):
                         b = x.shape[0]
                         key, initkey, samplekey = random.split(key, 3)
                         img = random.normal(initkey, (b, 256, 256, 1))
-                        y_hat_scaled = sample(module=module, params=params, key=samplekey, img=img, condition=x_scaled)
-                    
-                    y_hat = jnp.clip((y_hat_scaled+1)*0.5, 0, 1)
+                        y_hat_scaled = ddpm_sample(
+                            module=module,
+                            params=params,
+                            key=samplekey,
+                            img=img,
+                            condition=x_scaled,
+                        )
+
+                    y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
                     mse = jnp.mean(jnp.square(y - y_hat))
                     mae = jnp.mean(jnp.abs(y - y_hat))
                     ssim = jnp.mean(pix.ssim(y_hat, y))
@@ -362,12 +282,12 @@ def main(args):
                     wandb.log(log, step=step)
                 else:
                     print(log)
-                
+
                 if args.save is not None:
                     with open(args.save, "wb") as f:
                         cloudpickle.dump(state, f)
     elif args.sample:
-        x,y = next(iter(val_dl))
+        x, y = next(iter(val_dl))
         x = x * 2 - 1
         y = y * 2 - 1
 
@@ -378,10 +298,17 @@ def main(args):
         else:
             key, initkey, samplekey = random.split(key, 3)
             img = random.normal(initkey, (batch_size, 256, 256, 1))
-            y_hat = sample(module=module, params=params, key=samplekey, img=img, condition=x, num_sample_steps=100)
+            y_hat = ddpm_sample(
+                module=module,
+                params=params,
+                key=samplekey,
+                img=img,
+                condition=x,
+                num_sample_steps=100,
+            )
 
-        samples = jnp.concatenate((x,y,y_hat), axis=0)
-        samples = jnp.clip((samples+1) * 0.5, 0., 1.)
+        samples = jnp.concatenate((x, y, y_hat), axis=0)
+        samples = jnp.clip((samples + 1) * 0.5, 0.0, 1.0)
         samples = samples.reshape(-1, 256, 256)
         img = utils.make_grid(samples, nrow=3, ncol=batch_size)
         utils.save_image(img, "out.png")
@@ -393,34 +320,36 @@ def main(args):
         test_length = math.ceil(len(test_ds) / batch_size)
         it = iter(test_dl)
         for i in tqdm(range(test_length)):
-            x,y = next(it)
+            x, y = next(it)
             x = x * 2 - 1
-            batch_size, h, w, _= x.shape
+            batch_size, h, w, _ = x.shape
 
             if args.baseline:
                 y_hat_scaled = module.apply(params, x)
             else:
                 key, initkey, samplekey = random.split(key, 3)
-                img = random.normal(initkey, (batch_size,h,w,1))
-                y_hat_scaled = sample(module=module, params=params, key=samplekey, img=img, condition=x, num_sample_steps=100)
+                img = random.normal(initkey, (batch_size, h, w, 1))
+                y_hat_scaled = ddpm_sample(
+                    module=module,
+                    params=params,
+                    key=samplekey,
+                    img=img,
+                    condition=x,
+                    num_sample_steps=100,
+                )
 
-            y_hat = jnp.clip((y_hat_scaled+1)*0.5, 0, 1)
+            y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
             mse = jnp.mean(jnp.square(y - y_hat))
             mae = jnp.mean(jnp.abs(y - y_hat))
             ssim = jnp.mean(pix.ssim(y_hat, y))
             psnr = jnp.mean(pix.psnr(y_hat, y))
 
-            metrics = {
-                "mse": mse,
-                "mae": mae,
-                "ssim": ssim,
-                "psnr": psnr
-            }
+            metrics = {"mse": mse, "mae": mae, "ssim": ssim, "psnr": psnr}
 
             metric_list.append(metrics)
 
         mse = jnp.mean(jnp.stack([m["mse"] for m in metric_list]))
-        mae= jnp.mean(jnp.stack([m["mae"] for m in metric_list]))
+        mae = jnp.mean(jnp.stack([m["mae"] for m in metric_list]))
         ssim = jnp.mean(jnp.stack([m["ssim"] for m in metric_list]))
         psnr = jnp.mean(jnp.stack([m["psnr"] for m in metric_list]))
 
@@ -428,30 +357,76 @@ def main(args):
             "mse": mse.item(),
             "mae": mae.item(),
             "ssim": ssim.item(),
-            "psnr": psnr.item()
+            "psnr": psnr.item(),
         }
         with open("metrics.yaml", "w") as f:
             yaml.dump(metrics, f)
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     p.add_argument("--load", type=str, help="path to load pretrained weights from")
-    p.add_argument("--save", type=str, help="path to save weight to", default="checkpoint.pkl")
+    p.add_argument(
+        "--save", type=str, help="path to save weight to", default="checkpoint.pkl"
+    )
     p.add_argument("--train", action="store_true", help="train the model")
-    p.add_argument("--evaluate", action="store_true", help="evaluate the model on the test set")
+    p.add_argument(
+        "--evaluate", action="store_true", help="evaluate the model on the test set"
+    )
     p.add_argument("--sample", action="store_true", help="sample the model")
-    p.add_argument("--validate_every_n_steps", type=int, default=1000, help="validate the model every n steps")
-    p.add_argument("--log_every_n_steps", type=int, default=20, help="log the metrics every n steps")
-    p.add_argument("--min_snr_gamma", type=float, default=5.0, help="set loss weighting for min snr")
+    p.add_argument(
+        "--validate_every_n_steps",
+        type=int,
+        default=1000,
+        help="validate the model every n steps",
+    )
+    p.add_argument(
+        "--log_every_n_steps",
+        type=int,
+        default=20,
+        help="log the metrics every n steps",
+    )
+    p.add_argument(
+        "--min_snr_gamma",
+        type=float,
+        default=5.0,
+        help="set loss weighting for min snr",
+    )
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "dit", "uvit"], default="adm", help="which architecture to use")
+    p.add_argument(
+        "--arch",
+        type=str,
+        choices=["unet", "adm", "dit", "uvit"],
+        default="adm",
+        help="which architecture to use",
+    )
     p.add_argument("--batch_size", type=int, default=16, help="batch size")
-    p.add_argument("--objective", type=str, default="v", choices=["v", "eps", "start"], help="diffusion objective")
+    p.add_argument(
+        "--total_steps",
+        type=int,
+        default=150000,
+        help="total number of steps to train for",
+    )
+    p.add_argument("--seed", type=int, default=42, help="global seed")
+    p.add_argument(
+        "--objective",
+        type=str,
+        default="v",
+        choices=["v", "eps", "start"],
+        help="diffusion objective",
+    )
     p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
     p.add_argument("--baseline", action="store_true", help="use unet baseline")
-    p.add_argument("--disable_minsnr", action="store_true", help="disable min snr loss weighting")
-    p.add_argument("--ema_decay", type=float, default=0., help="use exponential moving average of weights")
+    p.add_argument(
+        "--disable_minsnr", action="store_true", help="disable min snr loss weighting"
+    )
+    p.add_argument(
+        "--ema_decay",
+        type=float,
+        default=0.0,
+        help="use exponential moving average of weights",
+    )
     p.add_argument("--augment", action="store_true", help="use data augmentation")
     main(p.parse_args())
