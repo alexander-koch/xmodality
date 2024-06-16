@@ -2,21 +2,14 @@ import jax
 from jax import jit, random, numpy as jnp
 import numpy as np
 import optax
-from einops import rearrange
-from unet import UNet
-from adm import ADM
-from dit import DiT
-from uvit import UViT
+from models import UNet, ADM, DiT, UViT
 import math
 import argparse
 import wandb
 import dm_pix as pix
 from glob import glob
 import yaml
-import torch
-from torch.utils.data import Dataset
-from torchvision import utils
-from typing import NamedTuple, Optional, Any, Iterable, Union, Callable
+from typing import NamedTuple
 from tqdm import tqdm
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
 from einops import reduce, repeat
@@ -24,14 +17,9 @@ from functools import partial
 import cloudpickle
 import pickle
 from jax_tqdm import loop_tqdm
+import utils
 import os
 os.environ['XLA_FLAGS'] = ("--xla_gpu_deterministic_ops=true")
-
-def cycle(dl: Iterable[Any]) -> Any:
-    while True:
-        it = iter(dl)
-        for x in it:
-            yield x
 
 def logsnr_schedule_cosine(t: jax.Array, logsnr_min: float =-15, logsnr_max: float =15) -> jax.Array:
     t_min = math.atan(math.exp(-0.5 * logsnr_max))
@@ -81,7 +69,7 @@ def p_sample(module, params, key, x, time, time_next, objective="v", **kwargs):
     noise = random.normal(key, x.shape)
     return jax.lax.cond(time_next == 0, lambda m: m, lambda m: m + jnp.sqrt(posterior_variance) * noise, model_mean)
 
-class SliceDS(Dataset):
+class SliceDS:
     def __init__(self, paths, rng, crop=True):
         self.paths = paths
         self.rng = rng
@@ -319,7 +307,7 @@ def main(args):
         log_every_n_steps = int(args.log_every_n_steps)
         print("total_steps:", total_steps)
 
-        train_dl = cycle(train_dl)
+        train_dl = utils.cycle(train_dl)
         for step in (p := tqdm(range(total_steps))):
             key, updatekey = random.split(key)
 
@@ -395,8 +383,9 @@ def main(args):
 
         samples = jnp.concatenate((x,y,y_hat), axis=0)
         samples = jnp.clip((samples+1) * 0.5, 0., 1.)
-        samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
-        utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=False, padding=1, pad_value=1.0), "out.png")
+        samples = samples.reshape(-1, 256, 256)
+        img = utils.make_grid(samples, nrow=3, ncol=batch_size)
+        utils.save_image(img, "out.png")
 
     elif args.evaluate:
         metric_list = []
