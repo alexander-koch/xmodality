@@ -75,13 +75,17 @@ class ResNetBlock(nn.Module):
             t = rearrange(t, "b c -> b 1 1 c")
             scale_shift = jnp.split(t, 2, axis=-1)
 
-        h = Block(dim_out=self.dim_out, dtype=self.dtype)(
-            x, scale_shift=scale_shift
-        )
+        h = Block(dim_out=self.dim_out, dtype=self.dtype)(x, scale_shift=scale_shift)
         h = Block(dim_out=self.dim_out, dtype=self.dtype)(h)
         if self.dim != self.dim_out:
-            h = h + nn.Dense(features=self.dim_out, kernel_init=nn.initializers.glorot_uniform(), bias_init=nn.initializers.zeros, dtype=self.dtype)(x)
+            h = h + nn.Dense(
+                features=self.dim_out,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x)
         return h
+
 
 class PixelShuffleUpsample(nn.Module):
     dim: int
@@ -167,7 +171,7 @@ class ADM(nn.Module):
 
         x = nn.Conv(
             features=self.dim,
-            kernel_size=(7,7),
+            kernel_size=(7, 7),
             padding=3,
             kernel_init=nn.initializers.glorot_uniform(),
             bias_init=nn.initializers.zeros,
@@ -193,10 +197,12 @@ class ADM(nn.Module):
                 dtype=self.dtype,
             )(x, time_embed)
             x_hat = nn.RMSNorm()(x)
-            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
-                    kernel_init=nn.initializers.glorot_uniform(),
-                    bias_init=nn.initializers.zeros,
-                    dtype=self.dtype)(x_hat)
+            x_hat = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x_hat)
             x = x + x_hat
             h.append(x)
 
@@ -212,10 +218,12 @@ class ADM(nn.Module):
             dtype=self.dtype,
         )(x, time_embed)
         x_hat = nn.RMSNorm()(x)
-        x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
-                kernel_init=nn.initializers.glorot_uniform(),
-                bias_init=nn.initializers.zeros,
-                dtype=self.dtype)(x_hat)
+        x_hat = nn.MultiHeadDotProductAttention(
+            num_heads=self.num_heads,
+            kernel_init=nn.initializers.glorot_uniform(),
+            bias_init=nn.initializers.zeros,
+            dtype=self.dtype,
+        )(x_hat)
         x = x + x_hat
         x = ResNetBlock(
             dim=mid_dim,
@@ -245,10 +253,12 @@ class ADM(nn.Module):
                 dtype=self.dtype,
             )(x, time_embed)
             x_hat = nn.RMSNorm()(x)
-            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
-                    kernel_init=nn.initializers.glorot_uniform(),
-                    bias_init=nn.initializers.zeros,
-                    dtype=self.dtype)(x_hat)
+            x_hat = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x_hat)
             x = x + x_hat
 
             if not is_last:

@@ -304,7 +304,6 @@ def main(args):
         #num_epochs = 200
         #train_length = math.ceil(len(train_ds) / batch_size)
         #total_steps = train_length * num_epochs
-        log_every_n_steps = int(args.log_every_n_steps)
         print("total_steps:", total_steps)
 
         train_dl = utils.cycle(train_dl)
@@ -328,7 +327,7 @@ def main(args):
             state = update(state, batch, updatekey)
             p.set_description(f"train_loss: {state.train_loss}")
 
-            if args.wandb and (step % log_every_n_steps == log_every_n_steps-1):
+            if args.wandb and (step % args.log_every_n_steps == args.log_every_n_steps-1):
                 wandb.log({"train_loss": state.train_loss}, step=step)
 
             if step % args.validate_every_n_steps == args.validate_every_n_steps-1:

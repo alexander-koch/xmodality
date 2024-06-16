@@ -37,7 +37,6 @@ class Block(nn.Module):
             bias_init=nn.initializers.zeros,
             dtype=self.dtype,
         )(x)
-        #x = nn.RMSNorm()(x)
         x = nn.GroupNorm(32)(x)
 
         if scale_shift is not None:
@@ -71,13 +70,17 @@ class ResNetBlock(nn.Module):
             t = rearrange(t, "b c -> b 1 1 c")
             scale_shift = jnp.split(t, 2, axis=-1)
 
-        h = Block(dim_out=self.dim_out, dtype=self.dtype)(
-            x, scale_shift=scale_shift
-        )
+        h = Block(dim_out=self.dim_out, dtype=self.dtype)(x, scale_shift=scale_shift)
         h = Block(dim_out=self.dim_out, dtype=self.dtype)(h)
         if self.dim != self.dim_out:
-            h = h + nn.Dense(features=self.dim_out, kernel_init=nn.initializers.glorot_uniform(), bias_init=nn.initializers.zeros, dtype=self.dtype)(x)
+            h = h + nn.Dense(
+                features=self.dim_out,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x)
         return h
+
 
 class PixelShuffleUpsample(nn.Module):
     dim: int
@@ -159,7 +162,7 @@ class UNet(nn.Module):
 
         x = nn.Conv(
             features=self.dim,
-            kernel_size=(7,7),
+            kernel_size=(7, 7),
             padding=3,
             kernel_init=nn.initializers.glorot_uniform(),
             bias_init=nn.initializers.zeros,

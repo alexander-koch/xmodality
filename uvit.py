@@ -8,19 +8,23 @@ from flax import linen as nn
 import jax_wavelets as jw
 from flax.linen.dtypes import promote_dtype
 
-def pair(x: Union[int, tuple[int, int, int]]):
-    return x if isinstance(x, tuple) else (x,x)
 
-def sinusoidal_embedding_2d(h: int, w: int, dim: int, temperature: int = 10000) -> jax.Array:
+def pair(x: Union[int, tuple[int, int, int]]):
+    return x if isinstance(x, tuple) else (x, x)
+
+
+def sinusoidal_embedding_2d(
+    h: int, w: int, dim: int, temperature: int = 10000
+) -> jax.Array:
     y, x = jnp.meshgrid(jnp.arange(h), jnp.arange(w), indexing="ij")
-    omega = jnp.arange(dim//4) / (dim // 4 - 1)
-    omega = 1.0 / (temperature ** omega)
+    omega = jnp.arange(dim // 4) / (dim // 4 - 1)
+    omega = 1.0 / (temperature**omega)
 
     y = jnp.ravel(y)[:, None] * omega[None, :]
     x = jnp.ravel(x)[:, None] * omega[None, :]
-    pos = jnp.concatenate((
-        jnp.sin(x), jnp.cos(x), jnp.sin(y), jnp.cos(y)), axis=1)
+    pos = jnp.concatenate((jnp.sin(x), jnp.cos(x), jnp.sin(y), jnp.cos(y)), axis=1)
     return jnp.expand_dims(pos, 0)
+
 
 class SinusoidalPositionEmbeddings(nn.Module):
     dim: int
@@ -89,6 +93,7 @@ class SwiGLU(nn.Module):
         )(x)
         return x
 
+
 class MLP(nn.Module):
     dim: int
     mlp_dim: int
@@ -114,21 +119,26 @@ class MLP(nn.Module):
         else:
             scale_shift = None
 
-        x = nn.Dense(features=self.mlp_dim,
+        x = nn.Dense(
+            features=self.mlp_dim,
             kernel_init=nn.initializers.glorot_uniform(),
             use_bias=False,
-            dtype=self.dtype)(x)
+            dtype=self.dtype,
+        )(x)
         x = nn.gelu(x)
 
         if scale_shift is not None:
             scale, shift = scale_shift
             x = x * (scale + 1) + shift
 
-        x = nn.Dense(features=self.dim,
+        x = nn.Dense(
+            features=self.dim,
             kernel_init=nn.initializers.glorot_uniform(),
             use_bias=False,
-            dtype=self.dtype)(x)
+            dtype=self.dtype,
+        )(x)
         return x
+
 
 class Transformer(nn.Module):
     dim: int
@@ -142,15 +152,22 @@ class Transformer(nn.Module):
     def __call__(self, x: jax.Array, time_emb: Optional[jax.Array] = None) -> jax.Array:
         for _ in range(self.depth):
             x_hat = nn.RMSNorm()(x)
-            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
-                    kernel_init=nn.initializers.glorot_uniform(),
-                    bias_init=nn.initializers.zeros,
-                    dtype=self.dtype)(x_hat)
+            x_hat = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x_hat)
             x = x + x_hat
 
             x_hat = nn.RMSNorm()(x)
-            #x_hat = MLP(dim=self.dim, mlp_dim=self.mlp_dim, time_emb_dim=self.time_emb_dim, dtype=self.dtype)(x_hat, time_emb)
-            x_hat = SwiGLU(dim=self.dim, mlp_dim=self.mlp_dim, time_emb_dim=self.time_emb_dim, dtype=self.dtype)(x_hat, time_emb)
+            # x_hat = MLP(dim=self.dim, mlp_dim=self.mlp_dim, time_emb_dim=self.time_emb_dim, dtype=self.dtype)(x_hat, time_emb)
+            x_hat = SwiGLU(
+                dim=self.dim,
+                mlp_dim=self.mlp_dim,
+                time_emb_dim=self.time_emb_dim,
+                dtype=self.dtype,
+            )(x_hat, time_emb)
             x = x + x_hat
         return nn.RMSNorm()(x)
 
@@ -205,13 +222,17 @@ class ResNetBlock(nn.Module):
             t = rearrange(t, "b c -> b 1 1 c")
             scale_shift = jnp.split(t, 2, axis=-1)
 
-        h = Block(dim_out=self.dim_out, dtype=self.dtype)(
-            x, scale_shift=scale_shift
-        )
+        h = Block(dim_out=self.dim_out, dtype=self.dtype)(x, scale_shift=scale_shift)
         h = Block(dim_out=self.dim_out, dtype=self.dtype)(h)
         if self.dim != self.dim_out:
-            h = h + nn.Dense(features=self.dim_out, kernel_init=nn.initializers.glorot_uniform(), bias_init=nn.initializers.zeros, dtype=self.dtype)(x)
+            h = h + nn.Dense(
+                features=self.dim_out,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x)
         return h
+
 
 class PixelShuffleUpsample(nn.Module):
     dim: int
@@ -249,6 +270,7 @@ class PixelShuffleDownsample(nn.Module):
         )(x)
         return x
 
+
 class Wavelet(nn.Module):
     channels: int
     wavelet: str = "bior4.4"
@@ -276,7 +298,7 @@ class UViT(nn.Module):
     vit_num_heads: int = 4
     vit_depth: int = 16
     num_heads: int = 4
-    #patch_size: Union[int, tuple[int, int]] = 4
+    # patch_size: Union[int, tuple[int, int]] = 4
     dtype: Any = jnp.float32
 
     @nn.compact
@@ -289,7 +311,7 @@ class UViT(nn.Module):
         dims = [self.dim, *map(lambda m: self.dim * m, self.dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
         num_resolutions = len(in_out)
-        #patch_height, patch_width = pair(self.patch_size)
+        # patch_height, patch_width = pair(self.patch_size)
 
         if time is not None:
             time_emb_dim = self.dim * 4
@@ -319,25 +341,25 @@ class UViT(nn.Module):
             x = jnp.concatenate((condition, x), axis=-1)
 
         wavelet = Wavelet(channels=x.shape[-1], dtype=self.dtype)
-        
+
         # Patching
-        #sh = x.shape[1:3]
-        #x = rearrange(x, "b (h p1) (w p2) c -> b h w (p1 p2 c)", p1=patch_height, p2=patch_width)
-        #x = nn.LayerNorm()(x)
-        #x = nn.Dense(
+        # sh = x.shape[1:3]
+        # x = rearrange(x, "b (h p1) (w p2) c -> b h w (p1 p2 c)", p1=patch_height, p2=patch_width)
+        # x = nn.LayerNorm()(x)
+        # x = nn.Dense(
         #    features=self.dim,
         #    kernel_init=nn.initializers.glorot_uniform(),
         #    bias_init=nn.initializers.zeros,
         #    dtype=self.dtype,
-        #)(x)
-        #x = nn.LayerNorm()(x)
-        
+        # )(x)
+        # x = nn.LayerNorm()(x)
+
         x = wavelet.encode(x)
         out_dim = x.shape[-1]
-        #out_dim = 1
+        # out_dim = 1
         x = nn.Conv(
             features=self.dim,
-            kernel_size=(7,7),
+            kernel_size=(7, 7),
             padding=3,
             kernel_init=nn.initializers.glorot_uniform(),
             bias_init=nn.initializers.zeros,
@@ -364,10 +386,12 @@ class UViT(nn.Module):
                 dtype=self.dtype,
             )(x, time_embed)
             x_hat = nn.RMSNorm()(x)
-            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
-                    kernel_init=nn.initializers.glorot_uniform(),
-                    bias_init=nn.initializers.zeros,
-                    dtype=self.dtype)(x_hat)
+            x_hat = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x_hat)
             x = x + x_hat
             h.append(x)
 
@@ -388,7 +412,7 @@ class UViT(nn.Module):
             num_heads=self.vit_num_heads,
             depth=self.vit_depth,
             time_emb_dim=time_emb_dim,
-            dtype=self.dtype
+            dtype=self.dtype,
         )(x, time_embed)
         x = rearrange(x, "b (h w) c -> b h w c", h=img_h, w=img_w)
 
@@ -413,10 +437,12 @@ class UViT(nn.Module):
                 dtype=self.dtype,
             )(x, time_embed)
             x_hat = nn.RMSNorm()(x)
-            x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads,
-                    kernel_init=nn.initializers.glorot_uniform(),
-                    bias_init=nn.initializers.zeros,
-                    dtype=self.dtype)(x_hat)
+            x_hat = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                kernel_init=nn.initializers.glorot_uniform(),
+                bias_init=nn.initializers.zeros,
+                dtype=self.dtype,
+            )(x_hat)
             x = x + x_hat
 
             if not is_last:
@@ -445,9 +471,9 @@ class UViT(nn.Module):
             dtype=self.dtype,
         )(x)
 
-        #out_dim = self.channels * patch_height * patch_width
-        #out_dim = 1
-        #x = nn.Sequential(
+        # out_dim = self.channels * patch_height * patch_width
+        # out_dim = 1
+        # x = nn.Sequential(
         #    [
         #        ResNetBlock(
         #            dim=self.dim,
@@ -461,8 +487,8 @@ class UViT(nn.Module):
         #            dtype=self.dtype,
         #        ),
         #    ]
-        #)(x)
+        # )(x)
 
         # Un-patching
-        #x = rearrange(x, "b h w (p1 p2 c) -> b (h p1) (w p2) c", p1=patch_height, p2=patch_width)
+        # x = rearrange(x, "b h w (p1 p2 c) -> b (h p1) (w p2) c", p1=patch_height, p2=patch_width)
         return x
