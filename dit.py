@@ -144,22 +144,31 @@ class FinalLayer(nn.Module):
         shift, scale = jnp.split(adaln, 2, axis=-1)
 
         x = modulate(nn.RMSNorm()(x), shift, scale)
+        #x = nn.Dense(
+        #    features=self.patch_size[0] * self.patch_size[1] * self.channels,
+        #    #kernel_init=nn.initializers.zeros,
+        #    kernel_init=nn.initializers.glorot_uniform(),
+        #    bias_init=nn.initializers.zeros,
+        #    dtype=self.dtype
+        #)(x)
+
+        #x = rearrange(
+        #    x,
+        #    "b (h w) (p1 p2 c) -> b (h p1) (w p2) c",
+        #    h=h,
+        #    w=w,
+        #    p1=self.patch_size[0],
+        #    p2=self.patch_size[1],
+        #)
+
         x = nn.Dense(
-            features=self.patch_size[0] * self.patch_size[1] * self.channels,
+            features=2048,
             #kernel_init=nn.initializers.zeros,
             kernel_init=nn.initializers.glorot_uniform(),
             bias_init=nn.initializers.zeros,
             dtype=self.dtype
         )(x)
-
-        x = rearrange(
-            x,
-            "b (h w) (p1 p2 c) -> b (h p1) (w p2) c",
-            h=h,
-            w=w,
-            p1=self.patch_size[0],
-            p2=self.patch_size[1],
-        )
+        x = rearrange(x, "b (h w) c -> b h w c", h=self.image_size[0], w=self.image_size[1])
         return x
 
 class DiT(nn.Module):
@@ -178,23 +187,26 @@ class DiT(nn.Module):
     ) -> jax.Array:
         patch_size = pair(self.patch_size)
         #image_size = (x.shape[1], x.shape[2])
+        #out_dim = 1
 
         if condition is not None:
             x = jnp.concatenate((x, condition), axis=-1)
 
         # DWT deconstruction
-        wavelet = Wavelet(channels=x.shape[-1], levels=2, dtype=self.dtype)
+        wavelet = Wavelet(channels=x.shape[-1], levels=5, dtype=self.dtype)
         x = wavelet.encode(x)
         out_dim = x.shape[-1]
         image_size = (x.shape[1], x.shape[2])
+
+        #print("dwt:", x.shape)
         
         # Patching
-        x = rearrange(
-            x,
-            "b (h p1) (w p2) c -> b h w (p1 p2 c)",
-            p1=patch_size[0],
-            p2=patch_size[1],
-        )
+        #x = rearrange(
+        #    x,
+        #    "b (h p1) (w p2) c -> b h w (p1 p2 c)",
+        #    p1=patch_size[0],
+        #    p2=patch_size[1],
+        #)
         x = nn.LayerNorm()(x)
         x = nn.Dense(
             self.hidden_size,
@@ -203,6 +215,8 @@ class DiT(nn.Module):
             dtype=self.dtype
         )(x)
         x = nn.LayerNorm()(x)
+
+        #print("patch:", x.shape)
 
         # Add pos emb
         h,w,d = x.shape[1:]
@@ -236,11 +250,19 @@ class DiT(nn.Module):
             )(x, t_emb)
 
         # Unpatching
+        #x = FinalLayer(self.hidden_size, image_size, patch_size, out_dim, dtype=self.dtype)(
+        #    x, t_emb
+        #)
+        #print("unpatch:", x.shape)
+
         x = FinalLayer(self.hidden_size, image_size, patch_size, out_dim, dtype=self.dtype)(
             x, t_emb
         )
+
+        #print("final", x.shape)
         
         # DWT reconstruction + merge to one image
         x = wavelet.decode(x)
         x = nn.Dense(features=1, kernel_init=nn.initializers.zeros, bias_init=nn.initializers.zeros, dtype=self.dtype)(x)
+        #print("out:", x.shape)
         return x

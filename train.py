@@ -13,11 +13,10 @@ import wandb
 import dm_pix as pix
 from glob import glob
 import yaml
-
 import torch
 from torch.utils.data import Dataset
 from torchvision import utils
-from typing import NamedTuple, Optional, Any, Iterable
+from typing import NamedTuple, Optional, Any, Iterable, Union, Callable
 from tqdm import tqdm
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
 from einops import reduce, repeat
@@ -25,6 +24,8 @@ from functools import partial
 import cloudpickle
 import pickle
 from jax_tqdm import loop_tqdm
+import os
+os.environ['XLA_FLAGS'] = ("--xla_gpu_deterministic_ops=true")
 
 def cycle(dl: Iterable[Any]) -> Any:
     while True:
@@ -164,6 +165,7 @@ class TrainingState(NamedTuple):
     params: dict
     opt_state: optax.OptState
     train_loss: jax.Array
+    ema_params: dict
 
 SEED = 42
 
@@ -171,14 +173,16 @@ def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     print("dtype:", dtype)
     print("config:", args)
+    batch_size = int(args.batch_size)
+    use_ema = args.ema_decay > 0
+    total_steps = 150000
 
     if args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
     elif args.arch == "adm":
         module = ADM(dim=128, channels=1, dtype=dtype)
     elif args.arch == "dit":
-        # DiT-L/16
-        module = DiT(patch_size=2, hidden_size=1024, depth=16, num_heads=16, in_channels=1, dtype=dtype)
+        module = DiT(patch_size=4, hidden_size=1024, depth=16, num_heads=16, in_channels=1, dtype=dtype)
     elif args.arch == "uvit":
         module = UViT(dim=128, channels=1, dtype=dtype)
     else:
@@ -188,9 +192,7 @@ def main(args):
         wandb.init(project="xmodality_paper", config=args)
 
     rng = np.random.default_rng(SEED)
-    min_snr_gamma = int(args.min_snr_gamma)
-    validate_every_n_steps = int(args.validate_every_n_steps)
-    opt = optax.adam(1e-4)
+    opt = optax.adam(learning_rate=1e-4)
 
     def base_loss(params, batch, keys):
         x, y = batch
@@ -228,7 +230,7 @@ def main(args):
 
         snr = jnp.exp(log_snr)
         if use_minsnr:
-            clipped_snr = jnp.clip(snr, a_max=min_snr_gamma)
+            clipped_snr = jnp.clip(snr, a_max=args.min_snr_gamma)
         else:
             clipped_snr = snr
 
@@ -250,7 +252,14 @@ def main(args):
         train_loss_value, grads = jax.value_and_grad(loss_fn)(state.params, batch, keys)
         updates, opt_state = opt.update(grads, state.opt_state, params=state.params)
         params = optax.apply_updates(state.params, updates)
-        return TrainingState(params, opt_state, train_loss_value)
+
+        if use_ema:
+            # params * (1-decay) + ema * decay
+            ema_params = optax.incremental_update(params, state.ema_params, step_size=1-args.ema_decay)
+        else:
+            ema_params = params
+
+        return TrainingState(params=params, opt_state=opt_state, train_loss=train_loss_value, ema_params=ema_params)
 
     train_paths = sorted(list(glob("data/train*.npz")))
     val_paths = sorted(list(glob("data/val*.npz")))
@@ -259,8 +268,6 @@ def main(args):
     train_ds = SliceDS(train_paths, rng=rng)
     val_ds = SliceDS(val_paths, rng=rng)
     test_ds = SliceDS(test_paths, rng=rng, crop=True)
-
-    batch_size = int(args.batch_size)
 
     # Setup dataloaders
     shard_opts = ShardOptions(0, 1)
@@ -303,12 +310,12 @@ def main(args):
             initial_params = module.init(initkey, x, time=dummy_time, condition=y)
 
         initial_opt_state = opt.init(initial_params)
-        state = TrainingState(initial_params, initial_opt_state, None)
+        state = TrainingState(params=initial_params, opt_state=initial_opt_state, train_loss=None, ema_params=initial_params)
 
     if args.train:
-        num_epochs = 400
-        train_length = math.ceil(len(train_ds) / batch_size)
-        total_steps = train_length * num_epochs
+        #num_epochs = 200
+        #train_length = math.ceil(len(train_ds) / batch_size)
+        #total_steps = train_length * num_epochs
         log_every_n_steps = int(args.log_every_n_steps)
         print("total_steps:", total_steps)
 
@@ -317,7 +324,10 @@ def main(args):
             key, updatekey = random.split(key)
 
             batch = next(train_dl)
-            #batch = augment(batch, augmentkey)
+            if args.augment:
+                key, augmentkey = random.split(key)
+                batch = augment(batch, augmentkey)
+
             #x,y = batch
             #print("x:", x.min(), x.max(), x.mean(), x.std())
             #print("y:", y.min(), y.max(), y.mean(), y.std())
@@ -333,7 +343,7 @@ def main(args):
             if args.wandb and (step % log_every_n_steps == log_every_n_steps-1):
                 wandb.log({"train_loss": state.train_loss}, step=step)
 
-            if step % validate_every_n_steps == validate_every_n_steps-1:
+            if step % args.validate_every_n_steps == args.validate_every_n_steps-1:
                 names = ["train", "val"]
                 dls = [train_dl, val_dl]
                 log = {}
@@ -341,13 +351,14 @@ def main(args):
                     x,y = next(iter(dl))
                     x_scaled = x * 2 - 1
 
+                    params = state.ema_params if use_ema else state.params
                     if args.baseline:
-                        y_hat_scaled = module.apply(state.params, x_scaled)
+                        y_hat_scaled = module.apply(params, x_scaled)
                     else:
                         b = x.shape[0]
                         key, initkey, samplekey = random.split(key, 3)
                         img = random.normal(initkey, (b, 256, 256, 1))
-                        y_hat_scaled = sample(module=module, params=state.params, key=samplekey, img=img, condition=x_scaled)
+                        y_hat_scaled = sample(module=module, params=params, key=samplekey, img=img, condition=x_scaled)
                     
                     y_hat = jnp.clip((y_hat_scaled+1)*0.5, 0, 1)
                     mse = jnp.mean(jnp.square(y - y_hat))
@@ -374,12 +385,13 @@ def main(args):
         y = y * 2 - 1
 
         batch_size = x.shape[0]
+        params = state.ema_params if use_ema else state.params
         if args.baseline:
-            y_hat = module.apply(state.params, x)
+            y_hat = module.apply(params, x)
         else:
             key, initkey, samplekey = random.split(key, 3)
             img = random.normal(initkey, (batch_size, 256, 256, 1))
-            y_hat = sample(module=module, params=state.params, key=samplekey, img=img, condition=x, num_sample_steps=100)
+            y_hat = sample(module=module, params=params, key=samplekey, img=img, condition=x, num_sample_steps=100)
 
         samples = jnp.concatenate((x,y,y_hat), axis=0)
         samples = jnp.clip((samples+1) * 0.5, 0., 1.)
@@ -389,6 +401,7 @@ def main(args):
     elif args.evaluate:
         metric_list = []
 
+        params = state.ema_params if use_ema else state.params
         test_length = math.ceil(len(test_ds) / batch_size)
         it = iter(test_dl)
         for i in tqdm(range(test_length)):
@@ -397,11 +410,11 @@ def main(args):
             batch_size, h, w, _= x.shape
 
             if args.baseline:
-                y_hat_scaled = module.apply(state.params, x)
+                y_hat_scaled = module.apply(params, x)
             else:
                 key, initkey, samplekey = random.split(key, 3)
                 img = random.normal(initkey, (batch_size,h,w,1))
-                y_hat_scaled = sample(module=module, params=state.params, key=samplekey, img=img, condition=x, num_sample_steps=100)
+                y_hat_scaled = sample(module=module, params=params, key=samplekey, img=img, condition=x, num_sample_steps=100)
 
             y_hat = jnp.clip((y_hat_scaled+1)*0.5, 0, 1)
             mse = jnp.mean(jnp.square(y - y_hat))
@@ -451,4 +464,6 @@ if __name__ == "__main__":
     p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
     p.add_argument("--baseline", action="store_true", help="use unet baseline")
     p.add_argument("--disable_minsnr", action="store_true", help="disable min snr loss weighting")
+    p.add_argument("--ema_decay", type=float, default=0., help="use exponential moving average of weights")
+    p.add_argument("--augment", action="store_true", help="use data augmentation")
     main(p.parse_args())
