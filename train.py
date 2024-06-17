@@ -10,13 +10,12 @@ from models import UNet, ADM, DiT, UViT
 import math
 import argparse
 import wandb
-import dm_pix as pix
 from glob import glob
 import yaml
 from typing import NamedTuple
 from tqdm import tqdm
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
-from einops import reduce
+from einops import reduce, repeat
 from functools import partial
 import cloudpickle
 import pickle
@@ -24,20 +23,9 @@ import utils
 from sampling import q_sample, ddpm_sample, right_pad_dims_to
 from dataset import SliceDS
 import os
+import dm_pix as pix
 
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
-
-
-def augment(batch, key):
-    lrkey, udkey = random.split(key)
-    x, y = batch
-    both = jnp.concatenate((x, y), axis=-1)
-    batch_size = x.shape[0]
-    lr_prob = random.bernoulli(key=lrkey, shape=(batch_size, 1, 1, 1))
-    ud_prob = random.bernoulli(key=udkey, shape=(batch_size, 1, 1, 1))
-    both = both * lr_prob + (1 - lr_prob) * jnp.flip(both, -2)
-    both = both * ud_prob + (1 - ud_prob) * jnp.flip(both, -3)
-    return jnp.split(both, 2, axis=-1)
 
 
 class TrainingState(NamedTuple):
@@ -161,7 +149,7 @@ def main(args):
     val_paths = sorted(list(glob("data/val*.npz")))
     test_paths = sorted(list(glob("data/test*.npz")))
 
-    train_ds = SliceDS(train_paths, rng=rng)
+    train_ds = SliceDS(train_paths, rng=rng, aug=args.augment)
     val_ds = SliceDS(val_paths, rng=rng)
     test_ds = SliceDS(test_paths, rng=rng)
 
@@ -225,21 +213,7 @@ def main(args):
         train_dl = utils.cycle(train_dl)
         for step in (p := tqdm(range(args.total_steps))):
             key, updatekey = random.split(key)
-
             batch = next(train_dl)
-            if args.augment:
-                key, augmentkey = random.split(key)
-                batch = augment(batch, augmentkey)
-
-            # x,y = batch
-            # print("x:", x.min(), x.max(), x.mean(), x.std())
-            # print("y:", y.min(), y.max(), y.mean(), y.std())
-            # samples = jnp.concatenate((x,y), axis=0)
-            # samples = torch.from_numpy(np.array(samples)).reshape(-1, 1, 256, 256)
-            # utils.save_image(utils.make_grid(samples, nrow=batch_size, normalize=True, padding=1, pad_value=1.0), "out.png")
-            # import sys
-            # sys.exit(0)
-
             state = update(state, batch, updatekey)
             p.set_description(f"train_loss: {state.train_loss}")
 
@@ -272,15 +246,9 @@ def main(args):
                         )
 
                     y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
-                    mse = jnp.mean(jnp.square(y - y_hat))
-                    mae = jnp.mean(jnp.abs(y - y_hat))
-                    ssim = jnp.mean(pix.ssim(y_hat, y))
-                    psnr = jnp.mean(pix.psnr(y_hat, y))
-
-                    log[f"{name}/mae"] = mae.item()
-                    log[f"{name}/mse"] = mse.item()
-                    log[f"{name}/ssim"] = ssim.item()
-                    log[f"{name}/psnr"] = psnr.item()
+                    metrics = utils.get_metrics(y_hat, y)
+                    for metric_key, metric_value in metrics.items():
+                        log[f"{name}/{metric_key}"] = metric_value
 
                 if args.wandb:
                     wandb.log(log, step=step)
@@ -318,8 +286,15 @@ def main(args):
         utils.save_image(img, "out.png")
 
     elif args.evaluate:
-        metric_list = []
+        from vit import get_b16_model
+        vit, vit_params = get_b16_model()
+        def get_features(img):
+            img = repeat(img, "b h w 1 -> b h w c", c=3)
+            f = vit.apply(vit_params, img, train=False)
+            return f
+        evaluator = utils.Evaluator(feature_extractor=get_features)
 
+        metric_list = []
         params = state.ema_params if use_ema else state.params
         test_length = math.ceil(len(test_ds) / batch_size)
         it = iter(test_dl)
@@ -343,26 +318,10 @@ def main(args):
                 )
 
             y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
-            mse = jnp.mean(jnp.square(y - y_hat))
-            mae = jnp.mean(jnp.abs(y - y_hat))
-            ssim = jnp.mean(pix.ssim(y_hat, y))
-            psnr = jnp.mean(pix.psnr(y_hat, y))
+            evaluator.update(y_hat, y)
 
-            metrics = {"mse": mse, "mae": mae, "ssim": ssim, "psnr": psnr}
-
-            metric_list.append(metrics)
-
-        mse = jnp.mean(jnp.stack([m["mse"] for m in metric_list]))
-        mae = jnp.mean(jnp.stack([m["mae"] for m in metric_list]))
-        ssim = jnp.mean(jnp.stack([m["ssim"] for m in metric_list]))
-        psnr = jnp.mean(jnp.stack([m["psnr"] for m in metric_list]))
-
-        metrics = {
-            "mse": mse.item(),
-            "mae": mae.item(),
-            "ssim": ssim.item(),
-            "psnr": psnr.item(),
-        }
+        metrics = evaluator.calculate()
+        print("metrics:", metrics)
         with open("metrics.yaml", "w") as f:
             yaml.dump(metrics, f)
 
