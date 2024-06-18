@@ -23,7 +23,6 @@ import utils
 from sampling import q_sample, ddpm_sample, right_pad_dims_to
 from dataset import SliceDS
 import os
-import dm_pix as pix
 
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
@@ -287,11 +286,14 @@ def main(args):
 
     elif args.evaluate:
         from vit import get_b16_model
+
         vit, vit_params = get_b16_model()
+
         def get_features(img):
             img = repeat(img, "b h w 1 -> b h w c", c=3)
             f = vit.apply(vit_params, img, train=False)
             return f
+
         evaluator = utils.Evaluator(feature_extractor=get_features)
 
         metric_list = []
