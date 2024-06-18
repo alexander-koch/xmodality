@@ -32,6 +32,7 @@ class TrainingState(NamedTuple):
     opt_state: optax.OptState
     train_loss: jax.Array
     ema_params: dict
+    step: int
 
 
 def main(args):
@@ -130,10 +131,18 @@ def main(args):
         params = optax.apply_updates(state.params, updates)
 
         if use_ema:
-            # params * (1-decay) + ema * decay
-            ema_params = optax.incremental_update(
-                params, state.ema_params, step_size=1 - args.ema_decay
-            )
+            # Only update every 10 steps
+            ema_params = jax.lax.cond(state.step % 10 == 9,
+                    lambda ema_params: ema_params,
+                    lambda ema_params: optax.incremental_update(params, ema_params, step_size=1 - args.ema_decay),
+                    state.ema_params)
+            #if state.step % 10 == 9:
+            #    # params * (1-decay) + ema * decay
+            #    ema_params = optax.incremental_update(
+            #        params, state.ema_params, step_size=1 - args.ema_decay
+            #    )
+            #else:
+            #    ema_params = params
         else:
             ema_params = params
 
@@ -142,6 +151,7 @@ def main(args):
             opt_state=opt_state,
             train_loss=train_loss_value,
             ema_params=ema_params,
+            step=state.step+1
         )
 
     train_paths = sorted(list(glob("data/train*.npz")))
@@ -206,6 +216,7 @@ def main(args):
             opt_state=initial_opt_state,
             train_loss=None,
             ema_params=initial_params,
+            step=0,
         )
 
     if args.train:

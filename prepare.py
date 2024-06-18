@@ -140,21 +140,21 @@ def main():
     print("val:", len(val_indices))
     print("test:", len(test_indices))
 
-    train_sources = [sources[i] for i in train_indices]
-    train_targets = [targets[i] for i in train_indices]
-    val_sources = [sources[i] for i in val_indices]
-    val_targets = [targets[i] for i in val_indices]
-    test_sources = [sources[i] for i in test_indices]
-    test_targets = [targets[i] for i in test_indices]
+    #train_sources = [sources[i] for i in train_indices]
+    #train_targets = [targets[i] for i in train_indices]
+    #val_sources = [sources[i] for i in val_indices]
+    #val_targets = [targets[i] for i in val_indices]
+    #test_sources = [sources[i] for i in test_indices]
+    #test_targets = [targets[i] for i in test_indices]
 
-    train_ds = MultiModalDataset(train_sources, train_targets)
-    val_ds = MultiModalDataset(val_sources, val_targets)
-    test_ds = MultiModalDataset(test_sources, test_targets)
+    #train_ds = MultiModalDataset(train_sources, train_targets)
+    #val_ds = MultiModalDataset(val_sources, val_targets)
+    #test_ds = MultiModalDataset(test_sources, test_targets)
 
-    Path("data").mkdir(exist_ok=True)
-    write_ds(train_ds, "train")
-    write_ds(val_ds, "val")
-    write_ds(test_ds, "test")
+    #Path("data").mkdir(exist_ok=True)
+    #write_ds(train_ds, "train")
+    #write_ds(val_ds, "val")
+    #write_ds(test_ds, "test")
 
 if __name__ == "__main__":
     main()
