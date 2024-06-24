@@ -105,7 +105,7 @@ def ddim_sample_step(
 ):
     log_snr = logsnr_schedule_cosine(time)
     log_snr_next = logsnr_schedule_cosine(time_next)
-    c = -jnp.expm1(log_snr - log_snr_next)
+    #c = -jnp.expm1(log_snr - log_snr_next)
 
     squared_alpha, squared_alpha_next = jax.nn.sigmoid(log_snr), jax.nn.sigmoid(
         log_snr_next
@@ -153,9 +153,9 @@ def ddim_sample_step(
     )
 
 
-@partial(jit, static_argnums=(0, 4, 5))
+@partial(jit, static_argnums=(0, 4))
 def ddim_sample(
-    module, params, key, img, num_total_steps=100, num_sample_steps=50, **kwargs
+    module, params, key, img, num_sample_steps=100, **kwargs
 ):
     steps = jnp.linspace(1.0, 0.0, num_sample_steps + 1)
     # steps = jnp.linspace(0, num_total_steps-1, steps=num_sample_steps)

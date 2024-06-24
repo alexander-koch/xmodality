@@ -20,7 +20,7 @@ from functools import partial
 import cloudpickle
 import pickle
 import utils
-from sampling import q_sample, ddpm_sample, right_pad_dims_to
+from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample
 from dataset import SliceDS
 import os
 
@@ -47,10 +47,10 @@ def main(args):
         module = ADM(dim=128, channels=1, dtype=dtype)
     elif args.arch == "dit":
         module = DiT(
-            patch_size=4,
+            patch_size=16,
             hidden_size=1024,
             depth=16,
-            num_heads=16,
+            num_heads=4,
             in_channels=1,
             dtype=dtype,
         )
@@ -136,13 +136,6 @@ def main(args):
                     lambda ema_params: ema_params,
                     lambda ema_params: optax.incremental_update(params, ema_params, step_size=1 - args.ema_decay),
                     state.ema_params)
-            #if state.step % 10 == 9:
-            #    # params * (1-decay) + ema * decay
-            #    ema_params = optax.incremental_update(
-            #        params, state.ema_params, step_size=1 - args.ema_decay
-            #    )
-            #else:
-            #    ema_params = params
         else:
             ema_params = params
 
@@ -197,18 +190,28 @@ def main(args):
     key = random.key(args.seed)
     key, initkey = random.split(key)
 
+    #x,y = next(iter(train_dl))
+    #batch_size=x.shape[0]
+    #samples = jnp.concatenate((x, y), axis=0)
+    #samples = samples.reshape(-1, 256, 256)
+    #img = utils.make_grid(samples, nrow=2, ncol=batch_size)
+    #utils.save_image(img, "out.png")
+    #import sys
+    #sys.exit(0)
+
     # Setup state
     if args.load is not None:
         with open(args.load, "rb") as f:
             state = pickle.load(f)
         print("train loss:", state.train_loss)
+        print("steps:", state.step)
     else:
         x, y = next(iter(train_dl))
         if args.baseline:
             initial_params = module.init(initkey, x)
         else:
             dummy_time = jnp.array([0.0])
-            initial_params = module.init(initkey, x, time=dummy_time, condition=y)
+            initial_params = jit(module.init)(initkey, x, time=dummy_time, condition=y)
 
         initial_opt_state = opt.init(initial_params)
         state = TrainingState(
