@@ -9,17 +9,17 @@ import pickle
 from models import UViT, ADM, UNet
 import numpy as np
 import matplotlib.pyplot as plt
-from sampling import ddpm_sample
+from sampling import ddpm_sample, ddim_sample
 import nibabel as nib
 from tqdm import tqdm
 import math
 import argparse
 from einops import rearrange
+import os
+
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 def transform(img):
-    #img = np.maximum(0, img)
-    #max_v = np.quantile(img, 0.999)
-    #return img / max_v
     min_v = img.min()
     max_v = img.max()
     return (img - min_v) / (max_v - min_v)
@@ -44,11 +44,11 @@ def main(args):
         state = pickle.load(f)
 
     if args.input.endswith(".nii.gz"):
-        run(module, state.params, not args.disable_diffusion, args.input, args.output, args.batch_size)
+        run(module, state.params, not args.disable_diffusion, args.input, args.output, args.batch_size, args.seed, args.sampler)
     elif args.input.endswith(".txt"):
         raise NotImplementedError()
 
-def run(module, params, use_diffusion, path, out_path, batch_size):
+def run(module, params, use_diffusion, path, out_path, batch_size, seed=0, sampler="ddpm"):
     tof_brain = nib.load(path)
     header, affine = tof_brain.header, tof_brain.affine
             
@@ -67,9 +67,11 @@ def run(module, params, use_diffusion, path, out_path, batch_size):
     tof_brain = jnp.pad(tof_brain, ((0,0), (0, pad_h), (0, pad_w), (0,0)))
 
     # Batch image
-    key = random.key(0)
+    key = random.key(seed)
     num_iters = math.ceil(num_slices / batch_size)
     keys = random.split(key, num_iters*2)
+
+    sample_fn = ddpm_sample if sampler == "ddpm" else ddim_sample
 
     out_slices = []
     for i in tqdm(range(num_iters)):
@@ -84,7 +86,7 @@ def run(module, params, use_diffusion, path, out_path, batch_size):
         tof_brain_slices = tof_brain[start:end]
 
         if use_diffusion:
-            out = ddpm_sample(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=100)
+            out = sample_fn(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=100)
         else:
             out = module.apply(params, tof_brain_slices)
         out_slices.append(out)
@@ -109,4 +111,6 @@ if __name__ == "__main__":
     p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")
+    p.add_argument("--seed", type=int, help="random seed to use", default=42)
+    p.add_argument("--sampler", type=str, choices=["ddpm", "ddim"], help="the sampling method to use", default="ddpm")
     main(p.parse_args())

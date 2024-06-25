@@ -49,8 +49,8 @@ def main(args):
         module = DiT(
             patch_size=16,
             hidden_size=1024,
-            depth=16,
-            num_heads=4,
+            depth=24,
+            num_heads=16,
             in_channels=1,
             dtype=dtype,
         )

@@ -5,7 +5,7 @@ from jax import random
 from typing import Union, Any, Optional
 from einops import rearrange, repeat
 import math
-from talking_heads import talking_heads_dot_product_attention
+#from talking_heads import talking_heads_dot_product_attention
 from functools import partial
 import scipy
 import pickle
