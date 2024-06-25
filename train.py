@@ -338,7 +338,7 @@ def main(args):
 
         metrics = evaluator.calculate()
         print("metrics:", metrics)
-        with open("metrics.yaml", "w") as f:
+        with open(args.eval_out_path, "w") as f:
             yaml.dump(metrics, f)
 
 
@@ -354,6 +354,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--evaluate", action="store_true", help="evaluate the model on the test set"
     )
+    p.add_argument("--eval_out_path", type=str, default="metrics.yaml", help="where to write evaluation metrics to")
     p.add_argument("--sample", action="store_true", help="sample the model")
     p.add_argument(
         "--validate_every_n_steps",

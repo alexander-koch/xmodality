@@ -6,7 +6,7 @@ import jax
 from jax import random, vmap
 import jax.numpy as jnp
 import pickle
-from models import UViT, ADM, UNet
+from models import UViT, ADM, UNet, DiT
 import numpy as np
 import matplotlib.pyplot as plt
 from sampling import ddpm_sample, ddim_sample
@@ -35,6 +35,15 @@ def main(args):
         module = UViT(dim=128, channels=1, dtype=dtype)
     elif args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
+    elif args.arch == "dit":
+        module = DiT(
+            patch_size=16,
+            hidden_size=1024,
+            depth=24,
+            num_heads=16,
+            in_channels=1,
+            dtype=dtype,
+        )
     else:
         raise NotImplementedError()
     assert args.load.endswith(".pkl")
@@ -107,7 +116,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
     p.add_argument("--input", type=str, help="path to image or list of images", required=True)
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit"], help="architecture", required=True)
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")

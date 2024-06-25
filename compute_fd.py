@@ -7,7 +7,7 @@ from glob import glob
 from dataset import SliceDS
 from sampling import ddpm_sample, ddim_sample
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
-from models import UViT, UNet, ADM
+from models import UViT, UNet, ADM, DiT
 import matplotlib.pyplot as plt
 from jax import random
 import pickle
@@ -50,6 +50,15 @@ def main(args):
         module = ADM(dim=128, channels=1, dtype=dtype)
     elif args.arch == "unet":
         module = UNet(dim=128, channels=1, dtype=dtype)
+    elif args.arch == "dit":
+        module = DiT(
+            patch_size=16,
+            hidden_size=1024,
+            depth=24,
+            num_heads=16,
+            in_channels=1,
+            dtype=dtype,
+        )
     else:
         raise ValueError
 
@@ -130,7 +139,7 @@ if __name__ == "__main__":
     )
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit"], help="architecture", required=True)
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--sampler", type=str, choices=["ddpm", "ddim"], default="ddpm", help="sampler to use")
     p.add_argument("--output", type=str, help="output path for scores", required=True)
     main(p.parse_args())

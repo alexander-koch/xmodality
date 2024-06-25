@@ -1,7 +1,6 @@
 import jax
 import flax.linen as nn
 import jax.numpy as jnp
-from jax import random
 from typing import Union, Any, Optional
 from einops import rearrange, repeat
 import math
