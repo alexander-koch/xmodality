@@ -1,3 +1,5 @@
+#!/bin/bash
+
 import os
 # disable tensorflow spamming
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -19,13 +21,14 @@ from einops import repeat
 from vit import get_b16_model
 import math
 import argparse
+import os
 
-SEED = 42
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 def main(args):
     use_ema = False
     batch_size = 16
-    rng = np.random.default_rng(SEED)
+    rng = np.random.default_rng(args.seed)
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     sample_fn = ddpm_sample if args.sampler == "ddpm" else ddim_sample
 
@@ -35,7 +38,7 @@ def main(args):
     # Setup dataloaders
     shard_opts = ShardOptions(0, 1)
     read_opts = ReadOptions(num_threads=16, prefetch_buffer_size=1)
-    test_sampler = IndexSampler(len(test_ds), shard_opts, shuffle=True, seed=SEED)
+    test_sampler = IndexSampler(len(test_ds), shard_opts, shuffle=True, seed=args.seed)
     test_dl = DataLoader(data_source=test_ds,
             sampler=test_sampler,
             worker_count=4,
@@ -43,7 +46,7 @@ def main(args):
             read_options=read_opts,
             operations=[Batch(batch_size=batch_size, drop_remainder=False)])
 
-    key = random.key(SEED)
+    key = random.key(args.seed)
     if args.arch == "uvit":
         module = UViT(dim=128, channels=1, dtype=dtype)
     elif args.arch == "adm":
@@ -75,9 +78,7 @@ def main(args):
         return f
     
     metric_list = []
-    #xs = [10, 25, 50, 75, 100]
     xs = [16, 32, 64, 128, 256, 1000]
-    # xs = [1000, 500, 250, 100, 50]
     for steps in xs:
         evaluator = utils.Evaluator(feature_extractor=get_features)
         test_length = math.ceil(len(test_ds) / batch_size)
@@ -104,34 +105,8 @@ def main(args):
         print(steps, metrics)
         metric_list.append(metrics)
 
-    scores = metric_list
     with open(args.output, "w") as f:
-        yaml.dump(scores, f)
-
-    #psnr_values = np.array([i["psnr"] for i in scores])
-    #mse_values = np.array([i["mse"] for i in scores])
-    #mae_values = np.array([i["mae"] for i in scores])
-    #ssim_values = np.array([i["ssim"] for i in scores])
-    #fd_values = np.array([i["fd"] for i in scores])
-
-    #fig, ax = plt.subplots(5)
-    #ax[0].plot(xs, psnr_values)
-    #ax[0].set_ylabel("psnr")
-
-    #ax[1].plot(xs, mse_values)
-    #ax[1].set_ylabel("mse")
-
-    #ax[2].plot(xs, mae_values)
-    #ax[2].set_ylabel("mae")
-
-    #ax[3].plot(xs, ssim_values)
-    #ax[3].set_ylabel("ssim")
-
-    #ax[4].plot(xs, fd_values)
-    #ax[4].set_ylabel("fd")
-
-    #plt.savefig("out.png")
-
+        yaml.dump(metric_list, f)
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(
@@ -142,4 +117,5 @@ if __name__ == "__main__":
     p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--sampler", type=str, choices=["ddpm", "ddim"], default="ddpm", help="sampler to use")
     p.add_argument("--output", type=str, help="output path for scores", required=True)
+    p.add_argument("--seed", type=int, default=42, help="global seed")
     main(p.parse_args())
