@@ -2,6 +2,9 @@
 
 """Trains and evaluates a cross-modality diffusion model."""
 
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
+
 import jax
 from jax import jit, random, numpy as jnp
 import numpy as np
@@ -22,10 +25,6 @@ import pickle
 import utils
 from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample
 from dataset import SliceDS
-import os
-
-os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
-
 
 class TrainingState(NamedTuple):
     params: dict

@@ -29,14 +29,15 @@ def main(args):
         return module.apply(params, x, **kwargs)
 
     key = random.key(0)
-    x = jnp.ones((1, 256, 256, 1))
-    condition = jnp.ones((1, 256, 256, 1))
+    batch_size = 1
+    x = jnp.ones((batch_size, 256, 256, 1))
+    condition = jnp.ones((batch_size, 256, 256, 1))
 
     if args.disable_diffusion:
         params = module.init(key, x)
         compiled = module_fn.lower(params, x).compile()
     else:
-        time = jnp.array([0.0])
+        time = jnp.ones((batch_size,))
         params = module.init(key, x, time=time, condition=condition)
         compiled = module_fn.lower(params, x, time=time, condition=condition).compile()
 

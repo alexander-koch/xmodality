@@ -2,11 +2,16 @@
 
 """Performs inference on a cross-modality diffusion model."""
 
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0"
+os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
+os.environ["TF_DETERMINISTIC_ops"] = "1"
+
 import jax
 from jax import random, vmap
 import jax.numpy as jnp
 import pickle
-from models import UViT, ADM, UNet, DiT
+from models import get_model
 import numpy as np
 import matplotlib.pyplot as plt
 from sampling import ddpm_sample, ddim_sample
@@ -15,9 +20,6 @@ from tqdm import tqdm
 import math
 import argparse
 from einops import rearrange
-import os
-
-os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 def transform(img):
     min_v = img.min()
@@ -29,23 +31,7 @@ def vmap_transform(img):
 
 def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
-    if args.arch == "adm":
-        module = ADM(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "uvit":
-        module = UViT(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "unet":
-        module = UNet(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "dit":
-        module = DiT(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            dtype=dtype,
-        )
-    else:
-        raise NotImplementedError()
+    module = get_model(args.arch, dtype=dtype)
     assert args.load.endswith(".pkl")
     print(args)
 

@@ -1,6 +1,8 @@
 import yaml
 
-paths = ["metrics_unet.yaml", "metrics_adm.yaml", "metrics_uvit.yaml", "metrics_dit.yaml"]
+#paths = ["metrics_unet.yaml", "metrics_adm.yaml", "metrics_uvit.yaml", "metrics_dit.yaml"]
+paths = ["scores/scores_unet.yaml"]
+
 names = ["U-Net", "ADM", "U-ViT", "DiT-L/16"]
 
 header="""\\begin{tabular}{@{}llllll@{}}

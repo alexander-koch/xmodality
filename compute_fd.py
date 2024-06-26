@@ -4,6 +4,11 @@ import os
 # disable tensorflow spamming
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+# force determinism
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0"
+os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
+os.environ["TF_DETERMINISTIC_ops"] = "1"
+
 import yaml
 from glob import glob
 from dataset import SliceDS
@@ -21,9 +26,6 @@ from einops import repeat
 from vit import get_b16_model
 import math
 import argparse
-import os
-
-os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 def main(args):
     use_ema = False
@@ -76,34 +78,47 @@ def main(args):
         img = repeat(img, "b h w 1 -> b h w c", c=3)
         f = vit.apply(vit_params, img, train=False)
         return f
-    
+
     metric_list = []
-    xs = [16, 32, 64, 128, 256, 1000]
-    for steps in xs:
+    if args.disable_diffusion:
         evaluator = utils.Evaluator(feature_extractor=get_features)
         test_length = math.ceil(len(test_ds) / batch_size)
         it = iter(test_dl)
         for i in tqdm(range(test_length)):
             x, y = next(it)
             x = x * 2 - 1
-            batch_size, h, w, _ = x.shape
-
-            key, initkey, samplekey = random.split(key, 3)
-            img = random.normal(initkey, (batch_size, h, w, 1))
-            y_hat_scaled = sample_fn(
-                module=module,
-                params=params,
-                key=samplekey,
-                img=img,
-                condition=x,
-                num_sample_steps=steps,
-            )
+            y_hat_scaled = module.apply(params, x)
             y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
             evaluator.update(y_hat, y)
-
         metrics = evaluator.calculate()
-        print(steps, metrics)
         metric_list.append(metrics)
+    else:
+        xs = [16, 32, 64, 128, 256, 1000]
+        for steps in xs:
+            evaluator = utils.Evaluator(feature_extractor=get_features)
+            test_length = math.ceil(len(test_ds) / batch_size)
+            it = iter(test_dl)
+            for i in tqdm(range(test_length)):
+                x, y = next(it)
+                x = x * 2 - 1
+                batch_size, h, w, _ = x.shape
+
+                key, initkey, samplekey = random.split(key, 3)
+                img = random.normal(initkey, (batch_size, h, w, 1))
+                y_hat_scaled = sample_fn(
+                    module=module,
+                    params=params,
+                    key=samplekey,
+                    img=img,
+                    condition=x,
+                    num_sample_steps=steps,
+                )
+                y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
+                evaluator.update(y_hat, y)
+
+            metrics = evaluator.calculate()
+            print(steps, metrics)
+            metric_list.append(metrics)
 
     with open(args.output, "w") as f:
         yaml.dump(metric_list, f)
@@ -117,5 +132,6 @@ if __name__ == "__main__":
     p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--sampler", type=str, choices=["ddpm", "ddim"], default="ddpm", help="sampler to use")
     p.add_argument("--output", type=str, help="output path for scores", required=True)
+    p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--seed", type=int, default=42, help="global seed")
     main(p.parse_args())
