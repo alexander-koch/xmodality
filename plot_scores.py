@@ -14,10 +14,22 @@ red="#f6433d"
 green="#88b16d"
 yellow="#f5a93d"
 
-colors=[blue, red, yellow, green]
+colors=[red, blue, yellow, blue, yellow]
 
-paths = ["scores_uvit.yaml", "scores_adm.yaml", "scores_uvit_ddim.yaml", "scores_adm_ddim.yaml"]
-names = ["U-ViT", "ADM", "U-ViT (ddim)", "ADM (ddim)"]
+#with open("scores/scores_unet.yaml", "r") as f:
+#    scores_unet = yaml.safe_load(f)
+
+#paths = ["scores_uvit_ddpm.yaml", "scores_adm.yaml", "scores_uvit_ddim.yaml", "scores_adm_ddim.yaml"]
+#names = ["U-ViT", "ADM", "U-ViT (ddim)", "ADM (ddim)"]
+
+paths = ["scores/scores_adm_ddpm.yaml",
+        "scores/scores_uvit_ddpm.yaml",
+        "scores/scores_dit_ddpm.yaml"]
+        #"scores/scores_uvit_ddim.yaml"]
+        #"scores/scores_dit_ddim.yaml"]
+
+names = ["ADM (DDPM)", "U-ViT (DDPM)", "DiT-L/16 (DDIM)"]
+#names = ["ADM (DDPM)", "U-ViT (DDPM)", "DiT-L/16 (DDPM)", "U-ViT (DDIM)"]#, "DiT-L/16 (DDIM)"]
 
 for i, (name, path) in enumerate(zip(names, paths)):
     with open(path, "r") as f:

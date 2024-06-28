@@ -55,6 +55,16 @@ def main(args):
         )
     elif args.arch == "uvit":
         module = UViT(dim=128, channels=1, dtype=dtype)
+    elif args.arch == "test":
+        from dit_alibi import DiTAlibi
+        module = DiTAlibi(
+            patch_size=16,
+            hidden_size=1024,
+            depth=24,
+            num_heads=16,
+            in_channels=1,
+            dtype=dtype,
+        )
     else:
         raise ValueError("invalid arch")
 
@@ -377,7 +387,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--arch",
         type=str,
-        choices=["unet", "adm", "dit", "uvit"],
+        choices=["unet", "adm", "dit", "uvit", "test"],
         default="adm",
         help="which architecture to use",
     )

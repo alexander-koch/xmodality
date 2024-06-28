@@ -53,14 +53,6 @@ def run(module, params, use_diffusion, path, out_path, batch_size, seed=0, sampl
     print("tof_brain (rescaled):", tof_brain.shape, tof_brain.min(), tof_brain.max())
     num_slices, h, w, _ = tof_brain.shape
 
-    # Padding
-    factor = 8
-    new_h = math.ceil(h / factor) * factor
-    new_w = math.ceil(w / factor) * factor
-    pad_h = new_h - h
-    pad_w = new_w - w
-    tof_brain = jnp.pad(tof_brain, ((0,0), (0, pad_h), (0, pad_w), (0,0)))
-
     # Batch image
     key = random.key(seed)
     num_iters = math.ceil(num_slices / batch_size)
@@ -77,13 +69,38 @@ def run(module, params, use_diffusion, path, out_path, batch_size, seed=0, sampl
             end = start + batch_size
         m = end - start
 
-        img = random.normal(keys[i*2], (m, new_h, new_w, 1))
+        img = random.normal(keys[i*2], (m, 256, 256, 1))
         tof_brain_slices = tof_brain[start:end]
 
-        if use_diffusion:
-            out = sample_fn(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
-        else:
-            out = module.apply(params, tof_brain_slices)
+        out = jnp.zeros((m, h, w, 1))
+        num_u = math.ceil(h / 256)
+        num_v = math.ceil(w / 256)
+
+        for u in range(num_u):
+            for v in range(num_v):
+                u_start = u * 256
+                u_end = u_start + 256
+                v_start =v * 256
+                v_end = v_start + 256
+
+                if u == num_u - 1:
+                    u_start = h - 256
+                    u_end = h
+                if v == num_v - 1:
+                    v_start = w - 256
+                    v_end = w
+
+                print("i:", i, "u:", u_start, u_end, u_end-u_start)
+                print("i:", i, "v:", v_start, v_end, v_end-v_start)
+                tof_chunk = tof_brain_slices[:, u_start:u_end, v_start:v_end,:]
+
+                if use_diffusion:
+                    chunk = sample_fn(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_chunk, num_sample_steps=num_sample_steps)
+                else:
+                    chunk = module.apply(params, tof_chunk)
+
+                print("chunk:", chunk.shape)
+                out = out.at[:, u_start:u_end, v_start:v_end, :].set(chunk)
         out_slices.append(out)
     
     out = jnp.concatenate(out_slices, axis=0) # [-1,1]
@@ -102,7 +119,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
     p.add_argument("--input", type=str, help="path to image or list of images", required=True)
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit", "test"], help="architecture", required=True)
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")

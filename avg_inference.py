@@ -39,11 +39,11 @@ def main(args):
         state = pickle.load(f)
 
     if args.input.endswith(".nii.gz"):
-        run(module, state.params, not args.disable_diffusion, args.input, args.output, args.batch_size, args.seed, args.sampler, args.num_sample_steps)
+        run(module, state.params, args.input, args.output, args.batch_size, args.seed, args.sampler, args.num_sample_steps)
     elif args.input.endswith(".txt"):
         raise NotImplementedError()
 
-def run(module, params, use_diffusion, path, out_path, batch_size, seed=0, sampler="ddpm", num_sample_steps=128):
+def run(module, params, path, out_path, batch_size, seed=0, sampler="ddpm", num_sample_steps=128):
     tof_brain = nib.load(path)
     header, affine = tof_brain.header, tof_brain.affine
             
@@ -69,6 +69,7 @@ def run(module, params, use_diffusion, path, out_path, batch_size, seed=0, sampl
     sample_fn = ddpm_sample if sampler == "ddpm" else ddim_sample
 
     out_slices = []
+    num_avg_iters = 4
     for i in tqdm(range(num_iters)):
         start = i*batch_size
         if start + batch_size >= num_slices:
@@ -80,10 +81,14 @@ def run(module, params, use_diffusion, path, out_path, batch_size, seed=0, sampl
         img = random.normal(keys[i*2], (m, new_h, new_w, 1))
         tof_brain_slices = tof_brain[start:end]
 
-        if use_diffusion:
-            out = sample_fn(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
-        else:
-            out = module.apply(params, tof_brain_slices)
+        samplekey = keys[i*2+1]
+        samplekeys = random.split(samplekey, num_avg_iters)
+
+        out = jnp.zeros((m, new_h, new_w, 1))
+        for j in range(num_avg_iters):
+            sample = sample_fn(module=module, params=params, key=samplekeys[j], img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
+            out += sample / num_avg_iters
+
         out_slices.append(out)
     
     out = jnp.concatenate(out_slices, axis=0) # [-1,1]
@@ -102,8 +107,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
     p.add_argument("--input", type=str, help="path to image or list of images", required=True)
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit", "test"], help="architecture", required=True)
-    p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")
     p.add_argument("--seed", type=int, help="random seed to use", default=42)
