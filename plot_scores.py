@@ -28,7 +28,7 @@ paths = ["scores/scores_adm_ddpm.yaml",
         #"scores/scores_uvit_ddim.yaml"]
         #"scores/scores_dit_ddim.yaml"]
 
-names = ["ADM (DDPM)", "U-ViT (DDPM)", "DiT-L/16 (DDIM)"]
+names = ["ADM", "U-ViT", "DiT-L/16"]
 #names = ["ADM (DDPM)", "U-ViT (DDPM)", "DiT-L/16 (DDPM)", "U-ViT (DDIM)"]#, "DiT-L/16 (DDIM)"]
 
 for i, (name, path) in enumerate(zip(names, paths)):

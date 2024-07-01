@@ -83,7 +83,7 @@ def make_grid(images: jax.Array, nrow: int, ncol: int) -> jax.Array:
         return jnp.squeeze(
             jnp.vstack(
                 [
-                    jnp.hstack([next(images) for _ in range(ncol)][::-1])
+                    jnp.hstack([next(images) for _ in range(ncol)])
                     for _ in range(nrow)
                 ]
             )

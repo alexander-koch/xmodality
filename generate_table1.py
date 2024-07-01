@@ -1,7 +1,7 @@
 import yaml
 
 #paths = ["metrics_unet.yaml", "metrics_adm.yaml", "metrics_uvit.yaml", "metrics_dit.yaml"]
-paths = ["scores/scores_unet.yaml"]
+paths = ["scores/scores_unet.yaml", "scores/scores_adm_ddpm.yaml", "scores/scores_uvit_ddpm.yaml", "scores/scores_dit_ddpm.yaml"]
 
 names = ["U-Net", "ADM", "U-ViT", "DiT-L/16"]
 
@@ -16,7 +16,7 @@ footer="""
 text=header
 for i, (name, path) in enumerate(zip(names, paths)):
     with open(path, "r") as f:
-        d = yaml.safe_load(f)
+        d = yaml.safe_load(f)[-1]
 
         mse = d['mse']
         mae = d['mae']
