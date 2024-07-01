@@ -140,12 +140,14 @@ def main():
     print("val:", len(val_indices))
     print("test:", len(test_indices))
 
-    #train_sources = [sources[i] for i in train_indices]
-    #train_targets = [targets[i] for i in train_indices]
-    #val_sources = [sources[i] for i in val_indices]
-    #val_targets = [targets[i] for i in val_indices]
-    #test_sources = [sources[i] for i in test_indices]
-    #test_targets = [targets[i] for i in test_indices]
+    train_sources = [sources[i] for i in train_indices]
+    train_targets = [targets[i] for i in train_indices]
+    val_sources = [sources[i] for i in val_indices]
+    val_targets = [targets[i] for i in val_indices]
+    test_sources = [sources[i] for i in test_indices]
+    test_targets = [targets[i] for i in test_indices]
+
+    print(test_sources)
 
     #train_ds = MultiModalDataset(train_sources, train_targets)
     #val_ds = MultiModalDataset(val_sources, val_targets)

@@ -14,11 +14,11 @@ import jax.numpy as jnp
 import utils
 import torch
 
-SEED = 42
+SEED = 17384
 
 def main():
     batch_size = 8
-    num_sample_steps = 128
+    num_sample_steps = 1000
 
     rng = np.random.default_rng(SEED)
 

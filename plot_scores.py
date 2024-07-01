@@ -38,7 +38,7 @@ for i, (name, path) in enumerate(zip(names, paths)):
     fd = [s["fd"] for s in scores]
     xs = [16, 32, 64, 128, 256, 1000]
     ys = fd
-    plt.plot(xs, ys, marker="o", label=name, color=colors[i])
+    plt.plot(xs, ys, marker="o", label=name, color=colors[i], markersize=8)
 
 plt.xscale("log")
 plt.grid(alpha=0.5, linewidth=0.5)
