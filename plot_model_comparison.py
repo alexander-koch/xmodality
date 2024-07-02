@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import utils
 import torch
 
-SEED = 17384
+SEED = 42
 
 def main():
     batch_size = 8

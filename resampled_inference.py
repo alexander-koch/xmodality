@@ -20,6 +20,7 @@ from tqdm import tqdm
 import math
 import argparse
 from einops import rearrange
+from scipy.ndimage import zoom
 
 def transform(img):
     min_v = img.min()
@@ -45,9 +46,30 @@ def main(args):
 
 def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0, sampler="ddpm", num_sample_steps=128):
     tof_brain = nib.load(path)
+    print("brain:", tof_brain.shape)
+    z = tof_brain.shape[-1]
+    target_shape = (256,256,z)
+    #tof_brain = resample_img(tof_brain, target_shape=(256,256,z), target_affine=np.eye(4))
+    #import sys
+    #sys.exit(0)
+
     header, affine = tof_brain.header, tof_brain.affine
+
+    #tof_brain
+    tof_brain_data = tof_brain.get_fdata().astype(np.float32)
+    dsfactor = [w/float(f) for w,f in zip(target_shape, tof_brain_data.shape)]
+    print(dsfactor)
+    tof_brain_data = zoom(tof_brain_data, zoom=dsfactor)
+    print("brain (resampled):", tof_brain_data.shape)
+    tof_brain = tof_brain_data
+
+    #img = nib.Nifti1Image(tof_brain_data, header=header, affine=affine)
+
+    #nib.save(img, out_path)
+    #import sys
+    #sys.exit(0)
             
-    tof_brain = jnp.array(tof_brain.get_fdata().astype(np.float32))
+    #tof_brain = jnp.array(tof_brain.get_fdata().astype(np.float32))
     tof_brain = rearrange(tof_brain, "h w b -> b h w 1")
     tof_brain = vmap_transform(tof_brain) * 2 - 1
     print("tof_brain (rescaled):", tof_brain.shape, tof_brain.min(), tof_brain.max())
@@ -55,7 +77,7 @@ def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0,
 
     # Padding
     # 8 for unet, uvit, adm, 16 for dit (patch size)
-    factor = 16 if args.arch in ["dit", "test"] else 8
+    factor = 16 if arch in ["dit", "test"] else 8
     new_h = math.ceil(h / factor) * factor
     new_w = math.ceil(w / factor) * factor
     pad_h = new_h - h
@@ -91,6 +113,11 @@ def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0,
     out = rearrange(out, "d h w 1 -> h w d")
     out = out[:h, :w]
     out = (out + 1) * 200 - 50 # [-50, 350]
+    print("result:", out.shape, out.min(), out.max())
+
+    print("resampling...")
+    dsfactor = [1.0/f for f in dsfactor]
+    out = zoom(out, zoom=dsfactor)
     print("final:", out.shape, out.min(), out.max())
 
     img = nib.Nifti1Image(out, header=header, affine=affine)

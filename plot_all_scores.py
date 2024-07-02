@@ -16,11 +16,11 @@ yellow="#f5a93d"
 
 colors=[red, blue, yellow, blue, yellow]
 
-#with open("scores/scores_unet.yaml", "r") as f:
-#    scores_unet = yaml.safe_load(f)
-
 #paths = ["scores_uvit_ddpm.yaml", "scores_adm.yaml", "scores_uvit_ddim.yaml", "scores_adm_ddim.yaml"]
 #names = ["U-ViT", "ADM", "U-ViT (ddim)", "ADM (ddim)"]
+
+with open("scores/scores_unet.yaml", "r") as f:
+    scores_unet = [yaml.safe_load(f)[0]] * 6
 
 paths = ["scores/scores_adm_ddpm.yaml",
         "scores/scores_uvit_ddpm.yaml",
