@@ -54,7 +54,7 @@ def run(module, params, path, out_path, batch_size, seed=0, sampler="ddpm", num_
     num_slices, h, w, _ = tof_brain.shape
 
     # Padding
-    factor = 8
+    factor = 16
     new_h = math.ceil(h / factor) * factor
     new_w = math.ceil(w / factor) * factor
     pad_h = new_h - h
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
     p.add_argument("--input", type=str, help="path to image or list of images", required=True)
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit", "test"], help="architecture", required=True)
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")
     p.add_argument("--seed", type=int, help="random seed to use", default=42)

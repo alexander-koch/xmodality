@@ -252,16 +252,15 @@ def main(args):
                     x, y = next(iter(dl))
                     x_scaled = x * 2 - 1
 
-                    params = state.ema_params if use_ema else state.params
                     if args.baseline:
-                        y_hat_scaled = module.apply(params, x_scaled)
+                        y_hat_scaled = module.apply(state.ema_params if use_ema else state.params, x_scaled)
                     else:
                         b = x.shape[0]
                         key, initkey, samplekey = random.split(key, 3)
                         img = random.normal(initkey, (b, 256, 256, 1))
                         y_hat_scaled = ddpm_sample(
                             module=module,
-                            params=params,
+                            params=state.ema_params if use_ema else state.params,
                             key=samplekey,
                             img=img,
                             condition=x_scaled,

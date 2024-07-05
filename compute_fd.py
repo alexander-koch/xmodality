@@ -14,7 +14,7 @@ from glob import glob
 from dataset import SliceDS
 from sampling import ddpm_sample, ddim_sample
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
-from models import UViT, UNet, ADM, DiT
+from models import get_model
 import matplotlib.pyplot as plt
 from jax import random
 import pickle
@@ -49,24 +49,7 @@ def main(args):
             operations=[Batch(batch_size=batch_size, drop_remainder=False)])
 
     key = random.key(args.seed)
-    if args.arch == "uvit":
-        module = UViT(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "adm":
-        module = ADM(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "unet":
-        module = UNet(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "dit":
-        module = DiT(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            dtype=dtype,
-        )
-    else:
-        raise ValueError
-
+    module = get_model(args.arch, dtype=dtype)
     assert args.load.endswith(".pkl")
     with open(args.load, "rb") as f:
         state = pickle.load(f)

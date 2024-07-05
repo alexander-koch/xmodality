@@ -300,7 +300,7 @@ class hMLPStemBackward(nn.Module):
         x = nn.gelu(x)
 
         x = rearrange(x, "b h w (p1 p2 c) -> b (h p1) (w p2) c", p1=4, p2=4)
-        x = nn.Dense(out_dim)(x)
+        x = nn.Dense(self.out_dim)(x)
         #x = nn.LayerNorm()(x)
         return x
 
@@ -363,7 +363,7 @@ class DiT(nn.Module):
         #print("dwt:", x.shape)
         
         # Patching
-        #x = SPT(patch_size=self.patch_size, channels=1, hidden_size=self.hidden_size, dtype=self.dtype)(x)
+        #x = SPT(patch_size=self.patch_size, hidden_size=self.hidden_size, dtype=self.dtype)(x)
 
         #x = nn.Conv(
         #    features=self.hidden_size,
@@ -371,6 +371,10 @@ class DiT(nn.Module):
         #    strides=(patch_size[0]//2, patch_size[1]//2),
         #    padding=0,
         #)(x)
+        #print("x:", x.shape)
+
+        #x = hMLPStemForward(self.hidden_size)(x)
+
         #print("x:", x.shape)
 
         x = rearrange(
@@ -396,7 +400,8 @@ class DiT(nn.Module):
         pos_emb = sinusoidal_embedding_2d(h,w,d)
         x = x + pos_emb
 
-        #num_register_tokens=4
+        #l = x.shape[1]
+        #num_register_tokens=16
         #seq_len = x.shape[1]
         #reg_token = self.param("reg_token", nn.initializers.truncated_normal(stddev=0.02), (num_register_tokens, d), self.dtype)
         #reg_token = repeat(reg_token, "n d -> b n d", b=x.shape[0])
@@ -425,11 +430,17 @@ class DiT(nn.Module):
             x = DiTBlock(
                 self.hidden_size, self.num_heads, self.mlp_ratio, dtype=self.dtype
             )(x, t_emb)
+        #x = x[:, :l, :]
 
         # Unpatching
         x = FinalLayer(self.hidden_size, image_size, patch_size, self.out_channels, dtype=self.dtype)(
             x, t_emb
         )
+
+        #x = rearrange(x, "b (h w) c -> b h w c", h=h, w=w)
+        #x = hMLPStemBackward(self.hidden_size, out_dim=1)(x)
+
+        #print("x:", x.shape)
 
         #print("final:", x.shape)
         #print("unpatch:", x.shape)

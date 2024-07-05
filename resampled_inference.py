@@ -49,27 +49,16 @@ def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0,
     print("brain:", tof_brain.shape)
     z = tof_brain.shape[-1]
     target_shape = (256,256,z)
-    #tof_brain = resample_img(tof_brain, target_shape=(256,256,z), target_affine=np.eye(4))
-    #import sys
-    #sys.exit(0)
 
     header, affine = tof_brain.header, tof_brain.affine
 
     #tof_brain
     tof_brain_data = tof_brain.get_fdata().astype(np.float32)
     dsfactor = [w/float(f) for w,f in zip(target_shape, tof_brain_data.shape)]
-    print(dsfactor)
     tof_brain_data = zoom(tof_brain_data, zoom=dsfactor)
     print("brain (resampled):", tof_brain_data.shape)
     tof_brain = tof_brain_data
-
-    #img = nib.Nifti1Image(tof_brain_data, header=header, affine=affine)
-
-    #nib.save(img, out_path)
-    #import sys
-    #sys.exit(0)
             
-    #tof_brain = jnp.array(tof_brain.get_fdata().astype(np.float32))
     tof_brain = rearrange(tof_brain, "h w b -> b h w 1")
     tof_brain = vmap_transform(tof_brain) * 2 - 1
     print("tof_brain (rescaled):", tof_brain.shape, tof_brain.min(), tof_brain.max())
@@ -104,7 +93,16 @@ def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0,
         tof_brain_slices = tof_brain[start:end]
 
         if use_diffusion:
-            out = sample_fn(module=module, params=params, key=keys[i*2+1], img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
+            samplekey = keys[i*2+1]
+            out = sample_fn(module=module, params=params, key=samplekey, img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
+
+            #num_avg_iters = 4
+            #samplekeys = random.split(samplekey, num_avg_iters)
+            #out = jnp.zeros((m, new_h, new_w, 1))
+            #for j in range(num_avg_iters):
+            #    sample = sample_fn(module=module, params=params, key=samplekeys[j], img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
+            #    out += sample / num_avg_iters
+
         else:
             out = module.apply(params, tof_brain_slices)
         out_slices.append(out)
