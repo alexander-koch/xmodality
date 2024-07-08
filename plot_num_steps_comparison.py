@@ -64,13 +64,30 @@ def main():
             img = random.normal(initkey, (1, 256, 256, 1))
             sample = ddpm_sample(module=module, params=params, key=samplekey, img=img, condition=condition, num_sample_steps=steps)
             samples.append(sample)
-
     plot_names = ["ADM", "U-ViT", "DiT-L/16"]
     samples = jnp.concatenate(samples, axis=0)
     samples = jnp.clip((samples+1) * 0.5, 0., 1.)
     samples = samples.reshape(-1, 256, 256)
     img = utils.make_grid(samples, nrow=len(plot_names), ncol=len(steps_list))
-    utils.save_image(img, "out.png")
+    utils.save_image(img, "ddpm.png")
+
+    # Same for DDIM sampling
+    samples = []
+    diff_models = model_names
+    for model_name in diff_models:
+        params = module_params[model_name]
+        module = modules[model_name]
+
+        for steps in steps_list:
+            print(f"sampling {model_name} for {steps} steps...")
+            img = random.normal(initkey, (1, 256, 256, 1))
+            sample = ddim_sample(module=module, params=params, key=samplekey, img=img, condition=condition, num_sample_steps=steps)
+            samples.append(sample)
+    samples = jnp.concatenate(samples, axis=0)
+    samples = jnp.clip((samples+1) * 0.5, 0., 1.)
+    samples = samples.reshape(-1, 256, 256)
+    img = utils.make_grid(samples, nrow=len(plot_names), ncol=len(steps_list))
+    utils.save_image(img, "ddim.png")
 
 if __name__ == "__main__":
     main()

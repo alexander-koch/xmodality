@@ -9,7 +9,7 @@ import jax
 from jax import jit, random, numpy as jnp
 import numpy as np
 import optax
-from models import UNet, ADM, DiT, UViT
+from models import get_model
 import math
 import argparse
 import wandb
@@ -23,7 +23,7 @@ from functools import partial
 import cloudpickle
 import pickle
 import utils
-from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample
+from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample, adjusted_ddim_sample, dpm1_sample
 from dataset import SliceDS
 
 class TrainingState(NamedTuple):
@@ -33,40 +33,12 @@ class TrainingState(NamedTuple):
     ema_params: dict
     step: int
 
-
 def main(args):
     print("config:", args)
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     batch_size = int(args.batch_size)
     use_ema = args.ema_decay > 0
-
-    if args.arch == "unet":
-        module = UNet(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "adm":
-        module = ADM(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "dit":
-        module = DiT(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            dtype=dtype,
-        )
-    elif args.arch == "uvit":
-        module = UViT(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "test":
-        from dit_alibi import DiTAlibi
-        module = DiTAlibi(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            dtype=dtype,
-        )
-    else:
-        raise ValueError("invalid arch")
+    module = get_model(name=args.arch, dtype=dtype)
 
     if args.wandb:
         wandb.init(project="xmodality_paper", config=args)
@@ -74,22 +46,24 @@ def main(args):
     rng = np.random.default_rng(args.seed)
     opt = optax.adam(learning_rate=1e-4)
 
-    def base_loss(params, batch, keys):
+    def base_loss(params, batch, key):
         x, y = batch
         x = x * 2 - 1
         y = y * 2 - 1
         y_hat = module.apply(params, x)
         return jnp.mean(jnp.square(y_hat - y))
 
-    def diff_loss(params, batch, keys, objective="v", use_minsnr=True):
+    def diff_loss(params, batch, key, objective="v", use_minsnr=True):
+        timekey, noisekey = random.split(key)
+
         x, y = batch
         x = x * 2 - 1
         y = y * 2 - 1
 
-        times = random.uniform(keys[0], (y.shape[0],))
+        times = random.uniform(timekey, (y.shape[0],))
         x_start = y
 
-        noise = random.normal(keys[1], x_start.shape)
+        noise = random.normal(noisekey, x_start.shape)
         x_noised, log_snr = q_sample(x_start=x_start, times=times, noise=noise)
         model_out = module.apply(params, x_noised, time=log_snr, condition=x)
 
@@ -134,8 +108,7 @@ def main(args):
 
     @jit
     def update(state, batch, key):
-        keys = random.split(key, 2)
-        train_loss_value, grads = jax.value_and_grad(loss_fn)(state.params, batch, keys)
+        train_loss_value, grads = jax.value_and_grad(loss_fn)(state.params, batch, key)
         updates, opt_state = opt.update(grads, state.opt_state, params=state.params)
         params = optax.apply_updates(state.params, updates)
 
@@ -198,15 +171,6 @@ def main(args):
     )
     key = random.key(args.seed)
     key, initkey = random.split(key)
-
-    #x,y = next(iter(train_dl))
-    #batch_size=x.shape[0]
-    #samples = jnp.concatenate((x, y), axis=0)
-    #samples = samples.reshape(-1, 256, 256)
-    #img = utils.make_grid(samples, nrow=2, ncol=batch_size)
-    #utils.save_image(img, "out.png")
-    #import sys
-    #sys.exit(0)
 
     # Setup state
     if args.load is not None:
@@ -291,7 +255,7 @@ def main(args):
         else:
             key, initkey, samplekey = random.split(key, 3)
             img = random.normal(initkey, (batch_size, 256, 256, 1))
-            y_hat = ddpm_sample(
+            y_hat = ddim_sample(
                 module=module,
                 params=params,
                 key=samplekey,

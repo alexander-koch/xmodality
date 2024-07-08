@@ -14,7 +14,21 @@ red="#f6433d"
 green="#88b16d"
 yellow="#f5a93d"
 
-colors=[red, blue, yellow, blue, yellow]
+import matplotlib
+import colorsys
+def scale_lightness(rgb, amount):
+    rgb = matplotlib.colors.ColorConverter.to_rgb(rgb)
+    c = colorsys.rgb_to_hls(*rgb)
+    return colorsys.hls_to_rgb(c[0], 1 - amount * (1 - c[1]), c[2])
+
+light_red = scale_lightness(red, .7)
+light_blue = scale_lightness(blue, .7)
+
+colors=[red, blue, yellow, light_red, light_blue]
+linestyles=["-", "-", "-", "--", "--", "--"]
+markers=["o", "o", "o", "h", "h", "h"]
+
+
 
 #paths = ["scores_uvit_ddpm.yaml", "scores_adm.yaml", "scores_uvit_ddim.yaml", "scores_adm_ddim.yaml"]
 #names = ["U-ViT", "ADM", "U-ViT (ddim)", "ADM (ddim)"]
@@ -24,11 +38,14 @@ with open("scores/scores_unet.yaml", "r") as f:
 
 paths = ["scores/scores_adm_ddpm.yaml",
         "scores/scores_uvit_ddpm.yaml",
-        "scores/scores_dit_ddpm.yaml"]
-        #"scores/scores_uvit_ddim.yaml"]
+        "scores/scores_dit_ddpm.yaml",
+        "scores/scores_adm_ddim.yaml",
+        "scores/scores_uvit_ddim.yaml"]
+        #"scores/scores_dit_ddim.yaml"]
         #"scores/scores_dit_ddim.yaml"]
 
-names = ["ADM", "U-ViT", "DiT-L/16"]
+names = ["ADM", "U-ViT", "DiT-L/16", "ADM (DDIM)", "U-ViT (DDIM)"]
+#names = ["ADM", "U-ViT", "DiT-L/16", "DiT-L/16 (DDIM)"]
 #names = ["ADM (DDPM)", "U-ViT (DDPM)", "DiT-L/16 (DDPM)", "U-ViT (DDIM)"]#, "DiT-L/16 (DDIM)"]
 
 fig, ax = plt.subplots(2,2, sharex=True)
@@ -46,7 +63,7 @@ for j,metric_name in enumerate(metric_names):
         fd = [s[metric_name] for s in scores]
         xs = [16, 32, 64, 128, 256, 1000]
         ys = fd
-        ax[u,v].plot(xs, ys, marker="o", label=name, color=colors[i])
+        ax[u,v].plot(xs, ys, marker=markers[i], label=name, color=colors[i], linestyle=linestyles[i], markersize=4)
         ax[u,v].tick_params(axis='both', which='both',length=0)
         
         if u == 1:

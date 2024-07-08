@@ -72,6 +72,20 @@ def p_sample(module, params, key, x, time, time_next, objective="v", **kwargs) -
     )
 
 
+def _ddpm_sample(module, params, key, img, num_sample_steps=100, **kwargs):
+    steps = jnp.linspace(1.0, 0.0, num_sample_steps + 1)
+    keys = random.split(key, num_sample_steps)
+
+    def step(i, img):
+        time = steps[i]
+        time_next = steps[i + 1]
+        return p_sample(module, params, keys[i], img, time, time_next, **kwargs)
+
+    img = jax.lax.fori_loop(0, num_sample_steps, step, img)
+    img = jnp.clip(img, -1, 1)
+    return img
+
+
 @partial(jit, static_argnums=(0, 4))
 def ddpm_sample(module, params, key, img, num_sample_steps=100, **kwargs):
     steps = jnp.linspace(1.0, 0.0, num_sample_steps + 1)
@@ -146,3 +160,112 @@ def ddim_sample_step(module, params, key, x, time, time_next, objective="v", **k
     x_start = jnp.clip(x_start, -1, 1)
     model_mean = alpha_next * x_start + (sigma_next / sigma) * (x - alpha * x_start)
     return model_mean
+
+
+def adjusted_ddim_sample_step(module, params, key, x, time, time_next, objective="v", **kwargs) -> jax.Array:
+    log_snr = logsnr_schedule_cosine(time)
+    log_snr_next = logsnr_schedule_cosine(time_next)
+    c = -jnp.expm1(log_snr - log_snr_next)
+
+    squared_alpha, squared_alpha_next = jax.nn.sigmoid(log_snr), jax.nn.sigmoid(
+        log_snr_next
+    )
+    squared_sigma, squared_sigma_next = jax.nn.sigmoid(-log_snr), jax.nn.sigmoid(
+        -log_snr_next
+    )
+
+    alpha, sigma, alpha_next, sigma_next = map(
+        jnp.sqrt, (squared_alpha, squared_sigma, squared_alpha_next, squared_sigma_next)
+    )
+
+    batch_log_snr = repeat(log_snr, " -> b", b=x.shape[0])
+    pred = module.apply(params, x, time=batch_log_snr, **kwargs)
+
+    if objective == "v":
+        x_start = alpha * x - sigma * pred
+    elif objective == "eps":
+        x_start = (x - sigma * pred) / alpha
+    elif objective == "start":
+        x_start = pred
+
+    x_start = jnp.clip(x_start, -1, 1)
+
+    xvar = 0.1 / (2 + squared_alpha / squared_sigma)
+    eps = (x - alpha * x_start) / sigma
+    zs_var = (alpha_next - alpha * sigma_next / sigma) ** 2 * xvar
+
+    d = 256 * 256
+
+    model_mean = alpha_next * x_start + jnp.sqrt(squared_sigma_next + (d/jnp.linalg.norm(eps)**2) * zs_var) * eps
+    return model_mean
+
+
+@partial(jit, static_argnums=(0, 4))
+def adjusted_ddim_sample(
+    module, params, key, img, num_sample_steps=100, **kwargs
+):
+    steps = jnp.linspace(1.0, 0.0, num_sample_steps + 1)
+    keys = random.split(key, num_sample_steps)
+
+    @loop_tqdm(n=num_sample_steps, desc="sampling step")
+    def step(i, img):
+        time = steps[i]
+        time_next = steps[i + 1]
+        return adjusted_ddim_sample_step(module, params, keys[i], img, time, time_next, **kwargs)
+
+    img = jax.lax.fori_loop(0, num_sample_steps, step, img)
+    img = jnp.clip(img, -1, 1)
+    return img
+
+def dpm1_sample_step(module, params, key, x, time, time_next, objective="v", **kwargs) -> jax.Array:
+    log_snr = logsnr_schedule_cosine(time)
+    log_snr_next = logsnr_schedule_cosine(time_next)
+    c = -jnp.expm1(log_snr - log_snr_next)
+
+    squared_alpha, squared_alpha_next = jax.nn.sigmoid(log_snr), jax.nn.sigmoid(
+        log_snr_next
+    )
+    squared_sigma, squared_sigma_next = jax.nn.sigmoid(-log_snr), jax.nn.sigmoid(
+        -log_snr_next
+    )
+
+    alpha, sigma, alpha_next, sigma_next = map(
+        jnp.sqrt, (squared_alpha, squared_sigma, squared_alpha_next, squared_sigma_next)
+    )
+
+    batch_log_snr = repeat(log_snr, " -> b", b=x.shape[0])
+    pred = module.apply(params, x, time=batch_log_snr, **kwargs)
+
+    if objective == "v":
+        x_start = alpha * x - sigma * pred
+    elif objective == "eps":
+        x_start = (x - sigma * pred) / alpha
+    elif objective == "start":
+        x_start = pred
+
+    x_start = jnp.clip(x_start, -1, 1)
+    eps = (x - alpha * x_start) / sigma
+
+    lam_t = jnp.log(alpha / sigma)
+    lam_tm = jnp.log(alpha_next / sigma_next)
+    exp_hi_m1 = jnp.exp(lam_tm - lam_t) - 1
+
+    return (alpha_next / alpha) * x - sigma_next * exp_hi_m1 * eps
+
+@partial(jit, static_argnums=(0, 4))
+def dpm1_sample(
+    module, params, key, img, num_sample_steps=100, **kwargs
+):
+    steps = jnp.linspace(1.0, 0.0, num_sample_steps + 1)
+    keys = random.split(key, num_sample_steps)
+
+    @loop_tqdm(n=num_sample_steps, desc="sampling step")
+    def step(i, img):
+        time = steps[i]
+        time_next = steps[i + 1]
+        return dpm1_sample_step(module, params, keys[i], img, time, time_next, **kwargs)
+
+    img = jax.lax.fori_loop(0, num_sample_steps, step, img)
+    img = jnp.clip(img, -1, 1)
+    return img
+

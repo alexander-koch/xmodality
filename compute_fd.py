@@ -12,7 +12,7 @@ os.environ["TF_DETERMINISTIC_ops"] = "1"
 import yaml
 from glob import glob
 from dataset import SliceDS
-from sampling import ddpm_sample, ddim_sample
+from sampling import ddpm_sample, ddim_sample, adjusted_ddim_sample
 from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
 from models import get_model
 import matplotlib.pyplot as plt
@@ -27,12 +27,19 @@ from vit import get_b16_model
 import math
 import argparse
 
+samplers = {
+    "ddpm": ddpm_sample,
+    "ddim": ddim_sample,
+    "addim": adjusted_ddim_sample
+}
+
 def main(args):
     use_ema = False
     batch_size = 16
     rng = np.random.default_rng(args.seed)
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
-    sample_fn = ddpm_sample if args.sampler == "ddpm" else ddim_sample
+    sample_fn = samplers[args.sampler]
+    #sample_fn = ddpm_sample if args.sampler == "ddpm" else ddim_sample
 
     test_paths = sorted(list(glob("data/test*.npz")))
     test_ds = SliceDS(test_paths, rng=rng)
@@ -113,7 +120,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
     p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
-    p.add_argument("--sampler", type=str, choices=["ddpm", "ddim"], default="ddpm", help="sampler to use")
+    p.add_argument("--sampler", type=str, choices=["ddpm", "ddim", "addim"], default="ddpm", help="sampler to use")
     p.add_argument("--output", type=str, help="output path for scores", required=True)
     p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--seed", type=int, default=42, help="global seed")

@@ -73,7 +73,7 @@ def main():
         samples.append(sample)
     samples.append(y)
 
-    plot_names = ["TOF (Source)", "U-Net", "ADM", "U-ViT", "DiT-L/16", "CTA (Ground truth)"]
+    #plot_names = ["TOF (Source)", "U-Net", "ADM", "U-ViT", "DiT-L/16", "CTA (Ground truth)"]
     samples = jnp.concatenate(samples, axis=0)
     samples = jnp.clip((samples+1) * 0.5, 0., 1.)
     samples = samples.reshape(-1, 256, 256)
