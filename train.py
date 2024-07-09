@@ -23,7 +23,7 @@ from functools import partial
 import cloudpickle
 import pickle
 import utils
-from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample, adjusted_ddim_sample, dpm2_sample, dpm1_sample
+from sampling import q_sample, right_pad_dims_to, get_sampler_names, get_sampler
 from dataset import SliceDS
 
 class TrainingState(NamedTuple):
@@ -255,13 +255,14 @@ def main(args):
         else:
             key, initkey, samplekey = random.split(key, 3)
             img = random.normal(initkey, (batch_size, 256, 256, 1))
-            y_hat = dpm2_sample(
+            sample_fn = get_sampler(args.sampler)
+            y_hat = sample_fn(
                 module=module,
                 params=params,
                 key=samplekey,
                 img=img,
                 condition=x,
-                num_sample_steps=50,
+                num_sample_steps=args.num_sample_steps,
             )
 
         samples = jnp.concatenate((x, y, y_hat), axis=0)
@@ -315,6 +316,8 @@ if __name__ == "__main__":
         help="total number of steps to train for",
     )
     p.add_argument("--seed", type=int, default=42, help="global seed")
+    p.add_argument("--sampler", type=str, choices=get_sampler_names(), help="sampler to use", default="ddpm")
+    p.add_argument("--num_sample_steps", type=int, default=128, help="number of sampling steps")
     p.add_argument(
         "--objective",
         type=str,

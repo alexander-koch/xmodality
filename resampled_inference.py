@@ -14,7 +14,7 @@ import pickle
 from models import get_model
 import numpy as np
 import matplotlib.pyplot as plt
-from sampling import ddpm_sample, ddim_sample
+from sampling import get_sampler_names, get_sampler
 import nibabel as nib
 from tqdm import tqdm
 import math
@@ -78,7 +78,7 @@ def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0,
     num_iters = math.ceil(num_slices / batch_size)
     keys = random.split(key, num_iters*2)
 
-    sample_fn = ddpm_sample if sampler == "ddpm" else ddim_sample
+    sample_fn = get_sampler(sampler)
 
     out_slices = []
     for i in tqdm(range(num_iters)):
@@ -134,5 +134,5 @@ if __name__ == "__main__":
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")
     p.add_argument("--seed", type=int, help="random seed to use", default=42)
     p.add_argument("--num_sample_steps", type=int, help="how many steps to sample for", default=128)
-    p.add_argument("--sampler", type=str, choices=["ddpm", "ddim"], help="the sampling method to use", default="ddpm")
+    p.add_argument("--sampler", type=str, choices=get_sampler_names(), help="the sampling method to use", default="ddpm")
     main(p.parse_args())
