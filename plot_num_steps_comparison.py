@@ -3,18 +3,15 @@
 from glob import glob
 from dataset import SliceDS
 from sampling import ddpm_sample, ddim_sample
-from grain.python import DataLoader, ReadOptions, Batch, ShardOptions, IndexSampler
 from models import get_model
 
 import matplotlib.pyplot as plt
-from jax import random
+from jax import random, numpy as jnp
 import pickle
 import numpy as np
-import jax.numpy as jnp
 import utils
-import torch
 
-SEED = 42
+SEED = 43
 
 def main():
     num_sample_steps = 128

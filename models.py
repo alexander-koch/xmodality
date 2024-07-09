@@ -21,15 +21,5 @@ def get_model(name: str, **kwargs):
             in_channels=1,
             **kwargs,
         )
-    elif name == "test":
-        from dit_alibi import DiTAlibi
-        return DiTAlibi(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            **kwargs,
-        )
     else:
         raise NotImplementedError

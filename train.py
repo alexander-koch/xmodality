@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Trains and evaluates a cross-modality diffusion model."""
+"""Trains a cross-modality diffusion model."""
 
 import os
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
@@ -23,7 +23,7 @@ from functools import partial
 import cloudpickle
 import pickle
 import utils
-from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample, adjusted_ddim_sample, dpm1_sample
+from sampling import q_sample, ddpm_sample, right_pad_dims_to, ddim_sample, adjusted_ddim_sample, dpm2_sample, dpm1_sample
 from dataset import SliceDS
 
 class TrainingState(NamedTuple):
@@ -255,13 +255,13 @@ def main(args):
         else:
             key, initkey, samplekey = random.split(key, 3)
             img = random.normal(initkey, (batch_size, 256, 256, 1))
-            y_hat = ddim_sample(
+            y_hat = dpm2_sample(
                 module=module,
                 params=params,
                 key=samplekey,
                 img=img,
                 condition=x,
-                num_sample_steps=100,
+                num_sample_steps=50,
             )
 
         samples = jnp.concatenate((x, y, y_hat), axis=0)
@@ -269,49 +269,6 @@ def main(args):
         samples = samples.reshape(-1, 256, 256)
         img = utils.make_grid(samples, nrow=3, ncol=batch_size)
         utils.save_image(img, "out.png")
-
-    elif args.evaluate:
-        from vit import get_b16_model
-
-        vit, vit_params = get_b16_model()
-
-        def get_features(img):
-            img = repeat(img, "b h w 1 -> b h w c", c=3)
-            f = vit.apply(vit_params, img, train=False)
-            return f
-
-        evaluator = utils.Evaluator(feature_extractor=get_features)
-
-        metric_list = []
-        params = state.ema_params if use_ema else state.params
-        test_length = math.ceil(len(test_ds) / batch_size)
-        it = iter(test_dl)
-        for i in tqdm(range(test_length)):
-            x, y = next(it)
-            x = x * 2 - 1
-            batch_size, h, w, _ = x.shape
-
-            if args.baseline:
-                y_hat_scaled = module.apply(params, x)
-            else:
-                key, initkey, samplekey = random.split(key, 3)
-                img = random.normal(initkey, (batch_size, h, w, 1))
-                y_hat_scaled = ddpm_sample(
-                    module=module,
-                    params=params,
-                    key=samplekey,
-                    img=img,
-                    condition=x,
-                    num_sample_steps=100,
-                )
-
-            y_hat = jnp.clip((y_hat_scaled + 1) * 0.5, 0, 1)
-            evaluator.update(y_hat, y)
-
-        metrics = evaluator.calculate()
-        print("metrics:", metrics)
-        with open(args.eval_out_path, "w") as f:
-            yaml.dump(metrics, f)
 
 
 if __name__ == "__main__":
@@ -323,10 +280,6 @@ if __name__ == "__main__":
         "--save", type=str, help="path to save weight to", default="checkpoint.pkl"
     )
     p.add_argument("--train", action="store_true", help="train the model")
-    p.add_argument(
-        "--evaluate", action="store_true", help="evaluate the model on the test set"
-    )
-    p.add_argument("--eval_out_path", type=str, default="metrics.yaml", help="where to write evaluation metrics to")
     p.add_argument("--sample", action="store_true", help="sample the model")
     p.add_argument(
         "--validate_every_n_steps",
@@ -350,7 +303,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--arch",
         type=str,
-        choices=["unet", "adm", "dit", "uvit", "test"],
+        choices=["unet", "adm", "dit", "uvit"],
         default="adm",
         help="which architecture to use",
     )
