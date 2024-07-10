@@ -23,7 +23,7 @@ from functools import partial
 import cloudpickle
 import pickle
 import utils
-from sampling import q_sample, right_pad_dims_to, get_sampler_names, get_sampler
+from sampling import q_sample, right_pad_dims_to, get_sampler_names, get_sampler, ddpm_sample
 from dataset import SliceDS
 
 class TrainingState(NamedTuple):
