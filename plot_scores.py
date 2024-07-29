@@ -25,9 +25,9 @@ light_red = scale_lightness(red, .7)
 light_blue = scale_lightness(blue, .7)
 light_yellow = scale_lightness(yellow, .7)
 
-colors=[red, blue, yellow, light_red, light_blue, light_yellow]
-linestyles=["-", "-", "-", "--", "--", "--"]
-markers=["o", "o", "o", "h", "h", "h"]
+colors=[red, blue, yellow, light_red, light_blue, light_yellow, green]
+linestyles=["-", "-", "-", "--", "--", "--", "-"]
+markers=["o", "o", "o", "h", "h", "h", "o"]
 
 #with open("scores/scores_unet.yaml", "r") as f:
 #    scores_unet = yaml.safe_load(f)

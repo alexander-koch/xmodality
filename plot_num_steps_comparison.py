@@ -11,7 +11,7 @@ import pickle
 import numpy as np
 import utils
 
-SEED = 43
+SEED = 42
 
 def main():
     num_sample_steps = 128

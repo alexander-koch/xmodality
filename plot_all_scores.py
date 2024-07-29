@@ -23,10 +23,11 @@ def scale_lightness(rgb, amount):
 
 light_red = scale_lightness(red, .7)
 light_blue = scale_lightness(blue, .7)
+light_yellow = scale_lightness(yellow, .7)
 
-colors=[red, blue, yellow, light_red, light_blue]
-linestyles=["-", "-", "-", "--", "--", "--"]
-markers=["o", "o", "o", "h", "h", "h"]
+colors=[red, blue, yellow, light_red, light_blue, light_yellow]
+linestyles=["-", "-", "-", "--", "--", "--", "--"]
+markers=["o", "o", "o", "h", "h", "h", "h"]
 
 
 
@@ -41,6 +42,7 @@ paths = ["scores/scores_adm_ddpm.yaml",
         "scores/scores_dit_ddpm.yaml",
         "scores/scores_adm_ddim.yaml",
         "scores/scores_uvit_ddim.yaml"]
+        #"scores/scores_uvit_addim.yaml"]
         #"scores/scores_dit_ddim.yaml"]
         #"scores/scores_dit_ddim.yaml"]
 
