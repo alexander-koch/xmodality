@@ -15,15 +15,29 @@ from scipy.ndimage import zoom
 from jax import vmap, random
 import jax
 import yaml
-
+from metrics_3d import mse_3d, mae_3d, ssim_3d, psnr_3d
+import chex
 
 def get_metrics(y_hat: jax.Array, y: jax.Array) -> dict[str, float]:
     """Assumes y_hat and y are in [-50,350] range."""
-    mse = jnp.mean(jnp.square(y - y_hat))
-    mae = jnp.mean(jnp.abs(y - y_hat))
+    data_range = (-50, 350)
+    chex.assert_rank([y_hat, y], 3)
+    chex.assert_type([y_hat, y], float)
+    chex.assert_equal_shape([y_hat, y])
+    
+    # add a channel dimension
+    y_hat = y_hat.reshape(y_hat.shape + (1,))
+    y = y.reshape(y.shape + (1,))
+
+    mse = jnp.mean(mse_3d(y_hat, y))
+    mae = jnp.mean(mae_3d(y_hat, y))
+    ssim = jnp.mean(ssim_3d(y_hat, y, data_range=data_range))
+    psnr = jnp.mean(psnr_3d(y_hat, y, data_range=data_range))
     return {
         "mse": mse.item(),
         "mae": mae.item(),
+        "ssim": ssim.item(),
+        "psnr": psnr.item()
     }
 
 
@@ -36,21 +50,24 @@ def transform(img: jax.Array) -> jax.Array:
 def vmap_transform(img: jax.Array) -> jax.Array:
     return vmap(transform)(img)
 
-def top_strip(img):
+def top_strip(img: jax.Array) -> jax.Array:
+    chex.assert_rank(img, 3)
     # Assume img (h,w,d)
     z = img.shape[-1]-1
     while z > 0 and jnp.all(jnp.isclose(img[:, :, z], img[:,:,z].min())):
         z = z - 1
     return img[:, :, :z+1], img.shape[-1] - z - 1
 
-def bottom_strip(img):
+def bottom_strip(img: jax.Array) -> jax.Array:
+    chex.assert_rank(img, 3)
     # Assume img (h,w,d)
     z = 0
     while z < img.shape[-1] and jnp.all(jnp.isclose(img[:, :, z], img[:,:,z].min())):
         z = z + 1
     return img[:, :, z:], z
 
-def strip(img):
+def strip(img: jax.Array) -> jax.Array:
+    chex.assert_rank(img, 3)
     img, shift_top = top_strip(img)
     img, shift_bottom = bottom_strip(img)
     return img, shift_bottom, shift_top
@@ -65,7 +82,9 @@ def generate(
     sampler="ddpm",
     num_sample_steps=128,
 ):
-    """Takes TOF-MRA image as input (unprocessed) and returns a CT in [-1,1] range"""
+    """Takes TOF-MRA image as input (unprocessed) and returns a CT in [-50,350] range"""
+    chex.assert_rank(img, 3)
+    chex.assert_type(img, float)
     img, lshift, rshift = strip(img)
 
     z = img.shape[-1]
@@ -121,11 +140,13 @@ def generate(
 
     out = jnp.clip(out, -1, 1)
     out = (out + 1) * 200 - 50  # [-50, 350]
-    out = jnp.pad(out, ((0,0),(0,0),(lshift,rshift),constant_values=-50))
+    out = jnp.pad(out, ((0,0),(0,0),(lshift,rshift)),constant_values=-50)
     return out
 
 
 def main(args):
+    print(args)
+
     # Load the data
     if args.external:
         sources, targets = [], []
@@ -156,7 +177,6 @@ def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     module = get_model(args.arch, dtype=dtype)
     assert args.load.endswith(".pkl")
-    print(args)
     with open(args.load, "rb") as f:
         state = pickle.load(f)
 
@@ -191,9 +211,13 @@ def main(args):
     # Accumulate metrics
     mse = jnp.mean(jnp.stack([s["mse"] for s in metrics_list]))
     mae = jnp.mean(jnp.stack([s["mae"] for s in metrics_list]))
+    ssim = jnp.mean(jnp.stack([s["ssim"] for s in metrics_list]))
+    psnr = jnp.mean(jnp.stack([s["psnr"] for s in metrics_list]))
     metrics = {
         "mse": mse.item(),
         "mae": mae.item(),
+        "ssim": ssim.item(),
+        "psnr": psnr.item()
     }
     with open(args.output, "w") as f:
         yaml.dump(metrics, f)

@@ -8,199 +8,47 @@
 #os.environ["TF_DETERMINISTIC_ops"] = "1"
 
 import jax
-from jax import random, vmap
 import jax.numpy as jnp
 import pickle
 from models import get_model
 import numpy as np
-import matplotlib.pyplot as plt
-from sampling import get_sampler_names, get_sampler
+from sampling import get_sampler_names
 import nibabel as nib
-from tqdm import tqdm
-import math
 import argparse
-from einops import rearrange
-from scipy.ndimage import zoom
-
-def transform(img):
-    min_v = img.min()
-    max_v = img.max()
-    return (img - min_v) / (max_v - min_v)
-
-def vmap_transform(img):
-    return vmap(transform)(img)
-
-def top_strip(img):
-    # Assume img (h,w,d)
-    z = img.shape[-1]-1
-    while z > 0 and jnp.all(jnp.isclose(img[:, :, z], img[:,:,z].min())):
-        z = z - 1
-    return img[:, :, :z+1], img.shape[-1] - z - 1
-
-def bottom_strip(img):
-    # Assume img (h,w,d)
-    z = 0
-    while z < img.shape[-1] and jnp.all(jnp.isclose(img[:, :, z], img[:,:,z].min())):
-        z = z + 1
-    return img[:, :, z:], z
-
-def strip(img):
-    img, shift_top = top_strip(img)
-    img, shift_bottom = bottom_strip(img)
-    return img, shift_bottom, shift_top
+import functools
+from external_validation import generate
 
 def main(args):
+    print(args)
+
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     module = get_model(args.arch, dtype=dtype)
     assert args.load.endswith(".pkl")
-    print(args)
-
     with open(args.load, "rb") as f:
         state = pickle.load(f)
 
+    generator = functools.partial(
+        generate,
+        module=module,
+        params=state.params,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        use_diffusion=not args.disable_diffusion,
+        sampler=args.sampler,
+        num_sample_steps=args.num_sample_steps,
+    )
+
     if args.input.endswith(".nii.gz"):
-        run(module, state.params, args.arch, not args.disable_diffusion, args.input, args.output, args.batch_size, args.seed, args.sampler, args.num_sample_steps)
+        source = nib.load(args.input)
+        header, affine = source.header, source.affine
+        source_data = source.get_fdata().astype(np.float32)
+
+        generated_data = generator(source_data)
+        print("generated:", generated_data.shape, generated_data.min(), generated_data.max(), generated_data.mean())
+        out_img = nib.Nifti1Image(generated_data, header=header, affine=affine)
+        nib.save(out_img, args.output)
     elif args.input.endswith(".txt"):
         raise NotImplementedError()
-
-def generate(module, params, img, batch_size=64, seed=0, use_diffusion=True, sampler="ddpm", num_sample_steps=128):
-    img, lshift, rshift = strip(img)
-    print("brain (stripped):", img.shape)
-
-    z = img.shape[-1]
-    target_shape = (256,256,z)
-
-    dsfactor = [w/float(f) for w,f in zip(target_shape, img.shape)]
-    img_resampled = zoom(img, zoom=dsfactor)
-    print("brain (resampled):", img_resampled.shape)
-            
-    img_resampled = rearrange(img_resampled, "h w b -> b h w 1")
-    tof_brain = vmap_transform(img_resampled) * 2 - 1
-    print("tof_brain (rescaled):", img_resampled.shape, img_resampled.min(), img_resampled.max())
-    num_slices, h, w, _ = img_resampled.shape
-
-    # Batch image
-    key = random.key(seed)
-    num_iters = math.ceil(num_slices / batch_size)
-    keys = random.split(key, num_iters*2)
-    sample_fn = get_sampler(sampler)
-
-    out_slices = []
-    for i in tqdm(range(num_iters)):
-        start = i*batch_size
-        if start + batch_size >= num_slices:
-            end = num_slices
-        else:
-            end = start + batch_size
-        m = end - start
-
-        img = random.normal(keys[i*2], (m, new_h, new_w, 1))
-        tof_brain_slices = tof_brain[start:end]
-
-        if use_diffusion:
-            samplekey = keys[i*2+1]
-            out = sample_fn(module=module, params=params, key=samplekey, img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
-        else:
-            out = module.apply(params, tof_brain_slices)
-        out_slices.append(out)
-    
-    out = jnp.concatenate(out_slices, axis=0) # [-1,1]
-    out = rearrange(out, "d h w 1 -> h w d")
-    out = out[:h, :w]
-    out = (out + 1) * 200 - 50 # [-50, 350]
-    print("result:", out.shape, out.min(), out.max())
-
-    print("resampling...")
-    dsfactor = [1.0/f for f in dsfactor]
-    out = zoom(out, zoom=dsfactor)
-    out = jnp.pad(out, ((0,0), (0,0), (lshift, rshift)))
-    print("final:", out.shape, out.min(), out.max())
-
-    return out
-
-def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0, sampler="ddpm", num_sample_steps=128):
-    tof_brain = nib.load(path)
-    print("brain:", tof_brain.shape)
-    header, affine = tof_brain.header, tof_brain.affine
-
-    #tof_brain
-    tof_brain_data = tof_brain.get_fdata().astype(np.float32)
-
-    tof_brain_data, lshift, rshift = strip(tof_brain_data)
-    print("brain (stripped):", tof_brain_data.shape)
-
-    z = tof_brain_data.shape[-1]
-    target_shape = (256,256,z)
-
-    dsfactor = [w/float(f) for w,f in zip(target_shape, tof_brain_data.shape)]
-    tof_brain_data = zoom(tof_brain_data, zoom=dsfactor)
-    print("brain (resampled):", tof_brain_data.shape)
-    tof_brain = tof_brain_data
-
-            
-    tof_brain = rearrange(tof_brain, "h w b -> b h w 1")
-    tof_brain = vmap_transform(tof_brain) * 2 - 1
-    print("tof_brain (rescaled):", tof_brain.shape, tof_brain.min(), tof_brain.max())
-    num_slices, h, w, _ = tof_brain.shape
-
-    # Padding
-    # 8 for unet, uvit, adm, 16 for dit (patch size)
-    factor = 16 if arch in ["dit", "test"] else 8
-    new_h = math.ceil(h / factor) * factor
-    new_w = math.ceil(w / factor) * factor
-    pad_h = new_h - h
-    pad_w = new_w - w
-    tof_brain = jnp.pad(tof_brain, ((0,0), (0, pad_h), (0, pad_w), (0,0)))
-
-    # Batch image
-    key = random.key(seed)
-    num_iters = math.ceil(num_slices / batch_size)
-    keys = random.split(key, num_iters*2)
-
-    sample_fn = get_sampler(sampler)
-
-    out_slices = []
-    for i in tqdm(range(num_iters)):
-        start = i*batch_size
-        if start + batch_size >= num_slices:
-            end = num_slices
-        else:
-            end = start + batch_size
-        m = end - start
-
-        img = random.normal(keys[i*2], (m, new_h, new_w, 1))
-        tof_brain_slices = tof_brain[start:end]
-
-        if use_diffusion:
-            samplekey = keys[i*2+1]
-            out = sample_fn(module=module, params=params, key=samplekey, img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
-
-            #num_avg_iters = 4
-            #samplekeys = random.split(samplekey, num_avg_iters)
-            #out = jnp.zeros((m, new_h, new_w, 1))
-            #for j in range(num_avg_iters):
-            #    sample = sample_fn(module=module, params=params, key=samplekeys[j], img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
-            #    out += sample / num_avg_iters
-
-        else:
-            out = module.apply(params, tof_brain_slices)
-        out_slices.append(out)
-    
-    out = jnp.concatenate(out_slices, axis=0) # [-1,1]
-    out = rearrange(out, "d h w 1 -> h w d")
-    out = out[:h, :w]
-    out = (out + 1) * 200 - 50 # [-50, 350]
-    print("result:", out.shape, out.min(), out.max())
-
-    print("resampling...")
-    dsfactor = [1.0/f for f in dsfactor]
-    out = zoom(out, zoom=dsfactor)
-
-    out = jnp.pad(out, ((0,0), (0,0), (lshift, rshift)), constant_values=-50)
-    print("final:", out.shape, out.min(), out.max())
-
-    img = nib.Nifti1Image(out, header=header, affine=affine)
-    nib.save(img, out_path)
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(
