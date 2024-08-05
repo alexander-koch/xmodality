@@ -15,7 +15,6 @@ class SliceDS:
         tgt_slice = item["tgt"]
 
         tgt_slice = (np.clip(tgt_slice, -50, 350) + 50) / 400
-
         min_v, max_v = src_slice.min(), src_slice.max()
         src_slice = src_slice.clip(min_v, max_v)
         src_slice = (src_slice - min_v) / (max_v - min_v)

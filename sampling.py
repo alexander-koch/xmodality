@@ -11,7 +11,7 @@ def logsnr_schedule_cosine(
 ) -> jax.Array:
     t_min = math.atan(math.exp(-0.5 * logsnr_max))
     t_max = math.atan(math.exp(-0.5 * logsnr_min))
-    return -2 * jnp.log(jnp.tan(t_min + t * (t_max - t_min))) + 2 * jnp.log(64 / 256)
+    return -2 * jnp.log(jnp.tan(t_min + t * (t_max - t_min))) #+ 2 * jnp.log(64 / 256)
 
 def logsnr_schedule_sigmoid(t: jax.Array, start=0, end=3, tau=.5):
     v_start = jax.nn.sigmoid(start / tau)
@@ -37,8 +37,7 @@ def right_pad_dims_to(x: jax.Array, t: jax.Array) -> jax.Array:
 
 
 def q_sample(x_start: jax.Array, times: jax.Array, noise: jax.Array) -> tuple[jax.Array, jax.Array]:
-    #log_snr = logsnr_schedule_cosine(times)
-    log_snr = logsnr_schedule_sigmoid(times)
+    log_snr = logsnr_schedule_cosine(times)
     log_snr_padded = right_pad_dims_to(x_start, log_snr)
     alpha, sigma = jnp.sqrt(jax.nn.sigmoid(log_snr_padded)), jnp.sqrt(
         jax.nn.sigmoid(-log_snr_padded)
@@ -48,11 +47,8 @@ def q_sample(x_start: jax.Array, times: jax.Array, noise: jax.Array) -> tuple[ja
 
 
 def p_sample(module, params, key, x, time, time_next, objective="v", **kwargs) -> jax.Array:
-    #log_snr = logsnr_schedule_cosine(time)
-    #log_snr_next = logsnr_schedule_cosine(time_next)
-    log_snr = logsnr_schedule_sigmoid(time)
-    log_snr_next = logsnr_schedule_sigmoid(time_next)
-
+    log_snr = logsnr_schedule_cosine(time)
+    log_snr_next = logsnr_schedule_cosine(time_next)
     c = -jnp.expm1(log_snr - log_snr_next)
 
     squared_alpha, squared_alpha_next = jax.nn.sigmoid(log_snr), jax.nn.sigmoid(

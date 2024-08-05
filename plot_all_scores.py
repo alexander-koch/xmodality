@@ -41,12 +41,13 @@ paths = ["scores/scores_adm_ddpm.yaml",
         "scores/scores_uvit_ddpm.yaml",
         "scores/scores_dit_ddpm.yaml",
         "scores/scores_adm_ddim.yaml",
-        "scores/scores_uvit_ddim.yaml"]
+        "scores/scores_uvit_ddim.yaml",
+        "scores/scores_uvit_dpm++2s.yaml"]
         #"scores/scores_uvit_addim.yaml"]
         #"scores/scores_dit_ddim.yaml"]
         #"scores/scores_dit_ddim.yaml"]
 
-names = ["ADM", "U-ViT", "DiT-L/16", "ADM (DDIM)", "U-ViT (DDIM)"]
+names = ["ADM", "U-ViT", "DiT-L/16", "ADM (DDIM)", "U-ViT (DDIM)", "U-ViT (DPM++2s)"]
 #names = ["ADM", "U-ViT", "DiT-L/16", "DiT-L/16 (DDIM)"]
 #names = ["ADM (DDPM)", "U-ViT (DDPM)", "DiT-L/16 (DDPM)", "U-ViT (DDIM)"]#, "DiT-L/16 (DDIM)"]
 

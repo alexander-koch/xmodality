@@ -33,24 +33,6 @@ class TrainingState(NamedTuple):
     ema_params: dict
     step: int
 
-def augment(key, batch):
-    x, y = batch
-    lrkey, udkey, r1key = random.split(key, 3)
-
-    p = random.bernoulli(r1key, shape=(x.shape[0],1,1,1))
-    x = x * p + np.rot90(x, k=1, axes=(1,2)) * (1-p)
-    y = y * p + np.rot90(y, k=1, axes=(1,2)) * (1-p)
-
-    p = random.bernoulli(lrkey, shape=(x.shape[0],1,1,1))
-    x = x * p + jnp.fliplr(x) * (1-p)
-    y = y * p + jnp.fliplr(y) * (1-p)
-
-    p = random.bernoulli(udkey, shape=(x.shape[0],1,1,1))
-    x = x * p + jnp.flipud(x) * (1-p)
-    y = y * p + jnp.flipud(y) * (1-p)
-
-    return x, y
-
 def main(args):
     print("config:", args)
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
@@ -63,7 +45,6 @@ def main(args):
 
     rng = np.random.default_rng(args.seed)
     opt = optax.adam(learning_rate=1e-4)
-    #opt = optax.adamw(learning_rate=1e-4, b1=0.9, b2=0.95, weight_decay=1e-2)
 
     def base_loss(params, batch, key):
         x, y = batch
@@ -151,7 +132,6 @@ def main(args):
     train_paths = sorted(list(glob("data/train*.npz")))
     val_paths = sorted(list(glob("data/val*.npz")))
     test_paths = sorted(list(glob("data/test*.npz")))
-
     train_ds = SliceDS(train_paths, rng=rng)
     val_ds = SliceDS(val_paths, rng=rng)
     test_ds = SliceDS(test_paths, rng=rng)
@@ -214,47 +194,11 @@ def main(args):
             step=0,
         )
 
-    from bias_field import vmap_random_bias_field, vmap_correct_intensity, power
-
-    def augment_batch(key, batch):
-        x,y = batch
-        coefficients = 1.0/np.prod(x.shape[1:]) * 0.01
-        biaskey, gammakey = random.split(key)
-
-        # Apply random bias field
-        biaskeys = random.split(biaskey, x.shape[0])
-        x_modified = vmap_random_bias_field(biaskeys, x, coefficients=coefficients)
-
-        # Apply random gamma
-        log_gamma = random.uniform(gammakey, shape=(x.shape[0],1,1,1), minval=-.3, maxval=0.3)
-        gamma = jnp.exp(log_gamma)
-        x_modified = power(x_modified, gamma)
-
-        #print("x:", x.min(), x.max())
-        x = x_modified
-    
-        # Return back to correct range
-        #x = vmap_correct_intensity(x_modified, x)
-
-        batch = (x,y)
-        return batch
-
-    #batch = next(iter(train_dl))
-    #batch = augment(key, batch)
-    #x,y = batch
-    #samples = jnp.concatenate((x, y), axis=0)
-    #samples = samples.reshape(-1, 256, 256)
-    #img = utils.make_grid(samples, nrow=2, ncol=x.shape[0])
-    #utils.save_image(img, "out.png")
-    #import sys
-    #sys.exit(0)
-
     if args.train:
         train_dl = utils.cycle(train_dl)
         for step in (p := tqdm(range(args.total_steps))):
             key, updatekey = random.split(key)
             batch = next(train_dl)
-            #batch = augment(augkey, batch)
             state = update(state, batch, updatekey)
             p.set_description(f"train_loss: {state.train_loss}")
 
@@ -321,7 +265,7 @@ def main(args):
                 num_sample_steps=args.num_sample_steps,
                 #objective=args.objective
             )
-
+            
         samples = jnp.concatenate((x, y, y_hat), axis=0)
         samples = jnp.clip((samples + 1) * 0.5, 0.0, 1.0)
         samples = samples.reshape(-1, 256, 256)

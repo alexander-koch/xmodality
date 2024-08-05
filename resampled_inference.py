@@ -30,6 +30,25 @@ def transform(img):
 def vmap_transform(img):
     return vmap(transform)(img)
 
+def top_strip(img):
+    # Assume img (h,w,d)
+    z = img.shape[-1]-1
+    while z > 0 and jnp.all(jnp.isclose(img[:, :, z], img[:,:,z].min())):
+        z = z - 1
+    return img[:, :, :z+1], img.shape[-1] - z - 1
+
+def bottom_strip(img):
+    # Assume img (h,w,d)
+    z = 0
+    while z < img.shape[-1] and jnp.all(jnp.isclose(img[:, :, z], img[:,:,z].min())):
+        z = z + 1
+    return img[:, :, z:], z
+
+def strip(img):
+    img, shift_top = top_strip(img)
+    img, shift_bottom = bottom_strip(img)
+    return img, shift_bottom, shift_top
+
 def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     module = get_model(args.arch, dtype=dtype)
@@ -44,20 +63,80 @@ def main(args):
     elif args.input.endswith(".txt"):
         raise NotImplementedError()
 
+def generate(module, params, img, batch_size=64, seed=0, use_diffusion=True, sampler="ddpm", num_sample_steps=128):
+    img, lshift, rshift = strip(img)
+    print("brain (stripped):", img.shape)
+
+    z = img.shape[-1]
+    target_shape = (256,256,z)
+
+    dsfactor = [w/float(f) for w,f in zip(target_shape, img.shape)]
+    img_resampled = zoom(img, zoom=dsfactor)
+    print("brain (resampled):", img_resampled.shape)
+            
+    img_resampled = rearrange(img_resampled, "h w b -> b h w 1")
+    tof_brain = vmap_transform(img_resampled) * 2 - 1
+    print("tof_brain (rescaled):", img_resampled.shape, img_resampled.min(), img_resampled.max())
+    num_slices, h, w, _ = img_resampled.shape
+
+    # Batch image
+    key = random.key(seed)
+    num_iters = math.ceil(num_slices / batch_size)
+    keys = random.split(key, num_iters*2)
+    sample_fn = get_sampler(sampler)
+
+    out_slices = []
+    for i in tqdm(range(num_iters)):
+        start = i*batch_size
+        if start + batch_size >= num_slices:
+            end = num_slices
+        else:
+            end = start + batch_size
+        m = end - start
+
+        img = random.normal(keys[i*2], (m, new_h, new_w, 1))
+        tof_brain_slices = tof_brain[start:end]
+
+        if use_diffusion:
+            samplekey = keys[i*2+1]
+            out = sample_fn(module=module, params=params, key=samplekey, img=img, condition=tof_brain_slices, num_sample_steps=num_sample_steps)
+        else:
+            out = module.apply(params, tof_brain_slices)
+        out_slices.append(out)
+    
+    out = jnp.concatenate(out_slices, axis=0) # [-1,1]
+    out = rearrange(out, "d h w 1 -> h w d")
+    out = out[:h, :w]
+    out = (out + 1) * 200 - 50 # [-50, 350]
+    print("result:", out.shape, out.min(), out.max())
+
+    print("resampling...")
+    dsfactor = [1.0/f for f in dsfactor]
+    out = zoom(out, zoom=dsfactor)
+    out = jnp.pad(out, ((0,0), (0,0), (lshift, rshift)))
+    print("final:", out.shape, out.min(), out.max())
+
+    return out
+
 def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0, sampler="ddpm", num_sample_steps=128):
     tof_brain = nib.load(path)
     print("brain:", tof_brain.shape)
-    z = tof_brain.shape[-1]
-    target_shape = (256,256,z)
-
     header, affine = tof_brain.header, tof_brain.affine
 
     #tof_brain
     tof_brain_data = tof_brain.get_fdata().astype(np.float32)
+
+    tof_brain_data, lshift, rshift = strip(tof_brain_data)
+    print("brain (stripped):", tof_brain_data.shape)
+
+    z = tof_brain_data.shape[-1]
+    target_shape = (256,256,z)
+
     dsfactor = [w/float(f) for w,f in zip(target_shape, tof_brain_data.shape)]
     tof_brain_data = zoom(tof_brain_data, zoom=dsfactor)
     print("brain (resampled):", tof_brain_data.shape)
     tof_brain = tof_brain_data
+
             
     tof_brain = rearrange(tof_brain, "h w b -> b h w 1")
     tof_brain = vmap_transform(tof_brain) * 2 - 1
@@ -116,6 +195,8 @@ def run(module, params, arch, use_diffusion, path, out_path, batch_size, seed=0,
     print("resampling...")
     dsfactor = [1.0/f for f in dsfactor]
     out = zoom(out, zoom=dsfactor)
+
+    out = jnp.pad(out, ((0,0), (0,0), (lshift, rshift)), constant_values=-50)
     print("final:", out.shape, out.min(), out.max())
 
     img = nib.Nifti1Image(out, header=header, affine=affine)
