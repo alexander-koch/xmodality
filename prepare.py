@@ -150,8 +150,8 @@ def main():
 
     print(test_sources)
 
-    with open("test_indices.json", "w") as f:
-        json.dump(test_indices.tolist(), f)
+    #with open("test_indices.json", "w") as f:
+    #    json.dump(test_indices.tolist(), f)
 
     #train_ds = MultiModalDataset(train_sources, train_targets)
     #val_ds = MultiModalDataset(val_sources, val_targets)

@@ -96,7 +96,6 @@ class DiTBlock(nn.Module):
         )
 
         x_hat = modulate(nn.RMSNorm()(x), shift_msa, scale_msa)
-
         x_hat = nn.MultiHeadDotProductAttention(num_heads=self.num_heads, dtype=self.dtype)(x_hat)
         x = x + gate_msa[:, jnp.newaxis] * x_hat
 

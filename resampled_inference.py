@@ -7,6 +7,9 @@
 #os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
 #os.environ["TF_DETERMINISTIC_ops"] = "1"
 
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
+
 import jax
 import jax.numpy as jnp
 import pickle
@@ -36,6 +39,8 @@ def main(args):
         use_diffusion=not args.disable_diffusion,
         sampler=args.sampler,
         num_sample_steps=args.num_sample_steps,
+        #order=0,
+        #prefilter=False
     )
 
     if args.input.endswith(".nii.gz"):

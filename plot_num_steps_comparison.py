@@ -1,5 +1,8 @@
 #!/bin/bash
 
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
+
 from glob import glob
 from dataset import SliceDS
 from sampling import ddpm_sample, ddim_sample
@@ -21,7 +24,7 @@ def main():
     test_paths = sorted(list(glob("data/test*.npz")))
     test_ds = SliceDS(test_paths, rng=rng)
 
-    dtype = jnp.float32
+    dtype = jnp.bfloat16
     print("loading models and weights")
     
     model_names = ["adm", "uvit", "dit"]
@@ -61,30 +64,40 @@ def main():
             img = random.normal(initkey, (1, 256, 256, 1))
             sample = ddpm_sample(module=module, params=params, key=samplekey, img=img, condition=condition, num_sample_steps=steps)
             samples.append(sample)
+
     plot_names = ["ADM", "U-ViT", "DiT-L/16"]
     samples = jnp.concatenate(samples, axis=0)
     samples = jnp.clip((samples+1) * 0.5, 0., 1.)
     samples = samples.reshape(-1, 256, 256)
     img = utils.make_grid(samples, nrow=len(plot_names), ncol=len(steps_list))
-    utils.save_image(img, "ddpm.png")
+    utils.save_image(img, "out.png")
+
+    #samples = []
+    #for steps in steps_list:
+    #    samples.append(y)
+    #samples = jnp.concatenate(samples, axis=0)
+    #samples = jnp.clip((samples+1) * 0.5, 0., 1.)
+    #samples = samples.reshape(-1, 256, 256)
+    #img = utils.make_grid(samples, nrow=3, ncol=1)
+    #utils.save_image(img, "out.png")
 
     # Same for DDIM sampling
-    samples = []
-    diff_models = model_names
-    for model_name in diff_models:
-        params = module_params[model_name]
-        module = modules[model_name]
+    #samples = []
+    #diff_models = model_names
+    #for model_name in diff_models:
+    #    params = module_params[model_name]
+    #    module = modules[model_name]
 
-        for steps in steps_list:
-            print(f"sampling {model_name} for {steps} steps...")
-            img = random.normal(initkey, (1, 256, 256, 1))
-            sample = ddim_sample(module=module, params=params, key=samplekey, img=img, condition=condition, num_sample_steps=steps)
-            samples.append(sample)
-    samples = jnp.concatenate(samples, axis=0)
-    samples = jnp.clip((samples+1) * 0.5, 0., 1.)
-    samples = samples.reshape(-1, 256, 256)
-    img = utils.make_grid(samples, nrow=len(plot_names), ncol=len(steps_list))
-    utils.save_image(img, "ddim.png")
+    #    for steps in steps_list:
+    #        print(f"sampling {model_name} for {steps} steps...")
+    #        img = random.normal(initkey, (1, 256, 256, 1))
+    #        sample = ddim_sample(module=module, params=params, key=samplekey, img=img, condition=condition, num_sample_steps=steps)
+    #        samples.append(sample)
+    #samples = jnp.concatenate(samples, axis=0)
+    #samples = jnp.clip((samples+1) * 0.5, 0., 1.)
+    #samples = samples.reshape(-1, 256, 256)
+    #img = utils.make_grid(samples, nrow=len(plot_names), ncol=len(steps_list))
+    #utils.save_image(img, "ddim.png")
 
 if __name__ == "__main__":
     main()

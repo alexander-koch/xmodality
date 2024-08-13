@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+
+#import os
+## force determinism
+#os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0"
+#os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
+#os.environ["TF_DETERMINISTIC_ops"] = "1"
+
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
+
 import json
 import argparse
 import numpy as np
@@ -81,6 +91,8 @@ def generate(
     use_diffusion=True,
     sampler="ddpm",
     num_sample_steps=128,
+    order=3,
+    prefilter=True
 ):
     """Takes TOF-MRA image as input (unprocessed) and returns a CT in [-50,350] range"""
     chex.assert_rank(img, 3)
@@ -92,7 +104,7 @@ def generate(
 
     # Resample to target resolution
     dsfactor = [w / float(f) for w, f in zip(target_shape, img.shape)]
-    img_resampled = zoom(img, zoom=dsfactor)
+    img_resampled = zoom(img, zoom=dsfactor, order=order, prefilter=prefilter)
 
     # Rescale to [-1,1]
     img_resampled = rearrange(img_resampled, "h w b -> b h w 1")
@@ -128,6 +140,7 @@ def generate(
             )
         else:
             out = module.apply(params, slices)
+        out = out.astype(jnp.float32)
         out_slices.append(out)
 
     out = jnp.concatenate(out_slices, axis=0)  # [-1,1]

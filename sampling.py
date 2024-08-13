@@ -71,7 +71,6 @@ def p_sample(module, params, key, x, time, time_next, objective="v", **kwargs) -
         x_start = (x - sigma * pred) / alpha
     elif objective == "start":
         x_start = pred
-
     x_start = jnp.clip(x_start, -1, 1)
 
     model_mean = alpha_next * (x * (1 - c) / alpha + c * x_start)

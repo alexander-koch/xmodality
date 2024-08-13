@@ -4,10 +4,11 @@ import os
 # disable tensorflow spamming
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# force determinism
-os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0"
-os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
-os.environ["TF_DETERMINISTIC_ops"] = "1"
+## force determinism
+#os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0"
+#os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
+#os.environ["TF_DETERMINISTIC_ops"] = "1"
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 import yaml
 from glob import glob
@@ -28,12 +29,10 @@ import math
 import argparse
 
 def main(args):
-    use_ema = False
     batch_size = 16
     rng = np.random.default_rng(args.seed)
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     sample_fn = get_sampler(args.sampler)
-    #sample_fn = ddpm_sample if args.sampler == "ddpm" else ddim_sample
 
     test_paths = sorted(list(glob("data/test*.npz")))
     test_ds = SliceDS(test_paths, rng=rng)
@@ -54,10 +53,9 @@ def main(args):
     assert args.load.endswith(".pkl")
     with open(args.load, "rb") as f:
         state = pickle.load(f)
-        params = state.ema_params if use_ema else state.params
+        params = state.params
     
     vit, vit_params = get_b16_model()
-
     def get_features(img):
         img = repeat(img, "b h w 1 -> b h w c", c=3)
         f = vit.apply(vit_params, img, train=False)

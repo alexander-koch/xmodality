@@ -32,6 +32,23 @@ names = ["ADM", "U-ViT", "DiT-L/16"]
 #text += footer
 #print(text)
 
+#import pandas as pd
+#all_names = names + ["U-Net"]
+#all_paths = paths + ["scores/scores_unet.yaml"]
+#entries = {}
+#for name, path in zip(all_names, all_paths):
+#    with open(path, "r") as f:
+#        d = yaml.safe_load(f)[-1]
+#    entries[name] = d
+#
+#df = pd.DataFrame.from_dict(entries, orient="index")
+#print(df)
+#for metric in ["mse", "mae", "psnr", "ssim"]:
+#    index =df[metric].argmin()
+#    print(df.iloc[index])
+#
+#import sys
+#sys.exit(0)
 
 
 header="""\\begin{tabular}{@{}lllllll@{}}
@@ -41,8 +58,6 @@ Model & Sampler & MSE ($\\downarrow$) & MAE ($\\downarrow$) & PSNR ($\\uparrow$)
 footer="""
 \\bottomrule
 \\end{tabular}"""
-
-
 text=header
 
 name = "U-Net"
