@@ -1,5 +1,4 @@
 *.pkl
-*.sh
 data
 wandb
 logs
