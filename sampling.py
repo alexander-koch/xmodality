@@ -6,6 +6,12 @@ from jax_tqdm import loop_tqdm
 from tqdm import tqdm
 from functools import partial
 
+def logsnr_schedule_linear(t: jax.Array, clip_min = 1e-9):
+    alpha = jnp.clip(1 - t, clip_min, 1.)
+    alpha_squared = alpha ** 2
+    sigma_squared = 1 - alpha_squared
+    return jnp.log(alpha_squared / sigma_squared)
+
 def logsnr_schedule_cosine(
     t: jax.Array, logsnr_min: float = -15, logsnr_max: float = 15
 ) -> jax.Array:

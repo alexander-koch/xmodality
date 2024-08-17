@@ -23,7 +23,7 @@ from functools import partial
 import cloudpickle
 import pickle
 import utils
-from sampling import q_sample, right_pad_dims_to, get_sampler_names, get_sampler, ddpm_sample
+from schedule_sampling import q_sample, right_pad_dims_to, get_sampler_names, get_sampler, ddpm_sample
 from dataset import SliceDS
 
 class TrainingState(NamedTuple):
@@ -337,5 +337,4 @@ if __name__ == "__main__":
         default=0.0,
         help="use exponential moving average of weights",
     )
-    p.add_argument("--augment", action="store_true", help="use data augmentation")
     main(p.parse_args())
