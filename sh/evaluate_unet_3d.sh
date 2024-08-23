@@ -12,5 +12,5 @@
 
 eval "$(conda shell.bash hook)"
 conda activate jax
-#srun python3 external_validation.py --arch unet --load weights/unet.pkl --output scores_3d/scores_unet.yaml --disable_diffusion --bfloat16
-srun python3 external_validation.py --arch unet --load weights/unet.pkl --output scores_3d/scores_unet_external.yaml --disable_diffusion --external --bfloat16
+srun python3 external_validation.py --arch unet --load weights/unet.pkl --output scores_3d_with_fd/scores_unet.yaml --disable_diffusion --bfloat16
+srun python3 external_validation.py --arch unet --load weights/unet.pkl --output scores_3d_with_fd/scores_unet_external.yaml --disable_diffusion --external --bfloat16

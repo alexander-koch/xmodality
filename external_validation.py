@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 
-#import os
-## force determinism
-#os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0"
-#os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
-#os.environ["TF_DETERMINISTIC_ops"] = "1"
-
 import os
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 import json
 import argparse
 import numpy as np
-from einops import rearrange
+from einops import rearrange, repeat
 import math
 from tqdm import tqdm
 import functools
@@ -26,7 +20,34 @@ from jax import vmap, random
 import jax
 import yaml
 from metrics_3d import mse_3d, mae_3d, ssim_3d, psnr_3d
+from typing import Callable
 import chex
+from vit import get_b16_model
+from fd import calculate_frechet_distance
+
+def get_features(feature_extractor: Callable,
+    y_hat: jax.Array,
+    y: jax.Array,
+    order: int = 3,
+    prefilter: bool = True
+):
+    # Images are in [-50, 350] range
+    chex.assert_rank([y_hat, y], 3)
+    chex.assert_type([y_hat, y], float)
+    chex.assert_equal_shape([y_hat, y])
+
+    # Map back to [0,1] range
+    # Use depth-wise slices
+    y_hat = (y_hat + 50) / 400
+    y = (y + 50) / 400
+    y_hat = rearrange(y_hat, "h w d -> d h w")
+    y = rearrange(y, "h w d -> d h w")
+
+    target_shape = (y.shape[0], 256, 256)
+    dsfactor = [w / float(f) for w, f in zip(target_shape, y.shape)]
+    y = zoom(y, zoom=dsfactor, order=order, prefilter=prefilter)
+    y_hat = zoom(y_hat, zoom=dsfactor, order=order, prefilter=prefilter)
+    return feature_extractor(y_hat), feature_extractor(y)
 
 def get_metrics(y_hat: jax.Array, y: jax.Array) -> dict[str, float]:
     """Assumes y_hat and y are in [-50,350] range."""
@@ -205,7 +226,15 @@ def main(args):
         num_sample_steps=args.num_sample_steps,
     )
 
+    # Get feature extractor
+    vit, vit_params = get_b16_model()
+    def feature_extractor(img):
+        img = repeat(img, "b h w -> b h w c", c=3)
+        f = vit.apply(vit_params, img, train=False)
+        return f
+
     metrics_list = []
+    features_list = []
     for src_path, tgt_path in zip(test_sources, test_targets):
         # Prepare and load data
         src_img = nib.load(src_path)
@@ -221,16 +250,32 @@ def main(args):
         metrics = get_metrics(tgt_img_data_hat, tgt_img_data)
         metrics_list.append(metrics)
 
+        # Get FD features
+        features = get_features(feature_extractor, tgt_img_data_hat, tgt_img_data)
+        features_list.append(features)
+
     # Accumulate metrics
     mse = jnp.mean(jnp.stack([s["mse"] for s in metrics_list]))
     mae = jnp.mean(jnp.stack([s["mae"] for s in metrics_list]))
     ssim = jnp.mean(jnp.stack([s["ssim"] for s in metrics_list]))
     psnr = jnp.mean(jnp.stack([s["psnr"] for s in metrics_list]))
+
+    # Calculate FD distance
+    features_y_hat = jnp.concatenate([f[0] for f in features_list], axis=0)
+    features_y = jnp.concatenate([f[1] for f in features_list], axis=0)
+
+    data_mu = jnp.mean(features_y, axis=0)
+    data_sigma = jnp.cov(features_y, rowvar=False)
+    model_mu = jnp.mean(features_y_hat, axis=0)
+    model_sigma = jnp.cov(features_y_hat, rowvar=False)
+    fd = calculate_frechet_distance(data_mu, data_sigma, model_mu, model_sigma)
+
     metrics = {
         "mse": mse.item(),
         "mae": mae.item(),
         "ssim": ssim.item(),
-        "psnr": psnr.item()
+        "psnr": psnr.item(),
+        "fd": fd.item()
     }
     with open(args.output, "w") as f:
         yaml.dump(metrics, f)

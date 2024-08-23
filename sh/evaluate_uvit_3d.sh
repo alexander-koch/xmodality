@@ -12,7 +12,7 @@
 
 eval "$(conda shell.bash hook)"
 conda activate jax
-#srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d/scores_uvit_ddpm.yaml --bfloat16
-#srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d/scores_uvit_ddim.yaml --bfloat16 --sampler ddim
-srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d/scores_uvit_ddpm_external.yaml --external --bfloat16
-srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d/scores_uvit_ddim_external.yaml --external --bfloat16 --sampler ddim
+#srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d_with_fd/scores_uvit_ddpm.yaml --bfloat16
+#srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d_with_fd/scores_uvit_ddim.yaml --bfloat16 --sampler ddim
+srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d_with_fd/scores_uvit_ddpm_external.yaml --external --bfloat16
+srun python3 external_validation.py --arch uvit --load weights/uvit.pkl --output scores_3d_with_fd/scores_uvit_ddim_external.yaml --external --bfloat16 --sampler ddim
