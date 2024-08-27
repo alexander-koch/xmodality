@@ -6,3 +6,4 @@ logs
 *.nii.gz
 __pycache__
 *.txt
+*.npz
