@@ -26,8 +26,8 @@ python3 inference.py --input <path/to/tof> --output <path/to/cta> --load weights
 
 ## Training and Evaluation
 
-See [Training][Training.md] for more information on how to train your model.
-See [Evaluation][Evaluation.md] for more information on how to evaluate a model.
+See [Training](Training.md) for more information on how to train your model.
+See [Evaluation](Evaluation.md) for more information on how to evaluate a model.
 
 ## Organization
 
