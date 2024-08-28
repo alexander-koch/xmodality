@@ -31,7 +31,7 @@ def main(args):
     with open(args.load, "rb") as f:
         state = pickle.load(f)
 
-    factor = 16 if args.arch in ["dit", "test"] else 8
+    factor = 16 if args.arch == "dit" else 8
     generator = functools.partial(
         generate,
         module=module,

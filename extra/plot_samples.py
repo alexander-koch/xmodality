@@ -11,7 +11,7 @@ bundle = bundles.icml2022(family="sans-serif", column="half", usetex=False, nrow
 plt.rcParams.update(bundle)
 
 # Cut image at the top
-ruler = -140
+ruler = -260
 
 def load_img(path, is_ct=True):
     img = nib.load(path)
@@ -25,7 +25,7 @@ def load_img(path, is_ct=True):
     x = nib.Nifti1Image(x, header=img.header, affine=img.affine)
     return x
 
-subject="043"
+subject="087"
 src_path=f"../modality_data/registered/{subject}_Warped.nii.gz"
 tgt_path=f"../modality_data/external/{subject}/CTA.nii.gz"
 unet_path = f"extra/samples/{subject}/sample_unet.nii.gz"
@@ -38,10 +38,12 @@ tgt_img = load_img(tgt_path)
 
 print("src:", src_img.shape)
 
-#cut_coords = (-5, 14, 25) # 87
+cut_coords = (-5, 14, 25) # 87
 
-cut_coords = (-24, -1, -570) #(305, 225, 129)
-annotate = True
+#cut_coords = (-24, -1, -570) #(305, 225, 129)
+#cut_coords = (18, 210, 892)
+
+annotate = False
 
 plot_img(src_img, cmap="grey", cut_coords=cut_coords, radiological=False, black_bg=True, draw_cross=False, annotate=annotate, output_file=f"extra/samples/{subject}/sample_src.png")
 plot_img(tgt_img, cmap="grey", cut_coords=cut_coords, radiological=False, black_bg=True, draw_cross=False, annotate=annotate, output_file=f"extra/samples/{subject}/sample_tgt.png")
