@@ -24,9 +24,10 @@ python3 resampled_inference.py --input <path/to/tof> --output <path/to/cta> --lo
 python3 inference.py --input <path/to/tof> --output <path/to/cta> --load weights/uvit.pkl --arch uvit --bfloat16
 ```
 
-## Training
+## Training and Evaluation
 
-TODO
+See [Training][Training.md] for more information on how to train your model.
+See [Evaluation][Evaluation.md] for more information on how to evaluate a model.
 
 ## Organization
 

@@ -1,33 +1,17 @@
 import os
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
-from models import ADM, UViT, UNet, DiT
 import jax
 from jax import jit, random, numpy as jnp
 import argparse
 from functools import partial
 import timeit
+from models import get_model
 
 
 def get_compiled(arch, bfloat16=False, disable_diffusion=False):
     dtype = jnp.bfloat16 if bfloat16 else jnp.float32
-    if arch == "adm":
-        module = ADM(dim=128, channels=1, dtype=dtype)
-    elif arch == "uvit":
-        module = UViT(dim=128, channels=1, dtype=dtype)
-    elif arch == "unet":
-        module = UNet(dim=128, channels=1, dtype=dtype)
-    elif arch == "dit":
-        module = DiT(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            dtype=dtype,
-        )
-    else:
-        raise NotImplementedError()
+    module = get_model(arch, dtype=dtype)
     
     @jit
     def module_fn(params, x, **kwargs):

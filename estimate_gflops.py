@@ -1,28 +1,13 @@
-from models import ADM, UViT, UNet, DiT
+#!/usr/bin/env python3
 import jax
 from jax import jit, random, numpy as jnp
 import argparse
 from functools import partial
+from models import get_model
 
 def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
-    if args.arch == "adm":
-        module = ADM(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "uvit":
-        module = UViT(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "unet":
-        module = UNet(dim=128, channels=1, dtype=dtype)
-    elif args.arch == "dit":
-        module = DiT(
-            patch_size=16,
-            hidden_size=1024,
-            depth=24,
-            num_heads=16,
-            in_channels=1,
-            dtype=dtype,
-        )
-    else:
-        raise NotImplementedError()
+    module = get_model(args.arch, dtype=dtype)
     
     @jit
     def module_fn(params, x, **kwargs):
