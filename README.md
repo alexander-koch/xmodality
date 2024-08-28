@@ -26,14 +26,15 @@ python3 inference.py --input <path/to/tof> --output <path/to/cta> --load weights
 
 ## Training and Evaluation
 
-See [Training](Training.md) for more information on how to train your model.
-See [Evaluation](Evaluation.md) for more information on how to evaluate a model.
+See [Training](docs/Training.md) for more information on how to train your model.
+See [Evaluation](docs/Evaluation.md) for more information on how to evaluate a model.
 
 ## Organization
 
 * `figures/` - Files to reproduce and generate data for the figures of the paper
 * `extra/` - Files to reproduce and generate data for the appendix
 * `sh` - Scripts to run the experiments on the HPC
+* `docs` - Files for documentation
 * `compute_fd.py` - Computes the Frechet Distance on ViT
 * `external_validation.py` - Computes 3D metrics on internal and external dataset
 
