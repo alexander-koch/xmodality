@@ -11,12 +11,12 @@ bundle = bundles.icml2022(family="sans-serif", column="half", usetex=False, nrow
 plt.rcParams.update(bundle)
 
 # Cut image at the top
-ruler = -260
+#ruler = -260
 
 def load_img(path, is_ct=True):
     img = nib.load(path)
     x = img.get_fdata().astype(np.float32)
-    #x = x[:,:,:ruler]
+    x = x[82:447,20:457,:127]
     if is_ct:
         x = x.clip(-50, 350)
         x = x + 50
