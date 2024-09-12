@@ -1,3 +1,5 @@
+# Taken from https://github.com/google-research/vision_transformer
+
 from flax.training import checkpoints
 import numpy as np
 import jax
