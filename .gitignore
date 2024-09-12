@@ -2,7 +2,6 @@
 data
 wandb
 logs
-*.png
 *.nii.gz
 __pycache__
 *.txt

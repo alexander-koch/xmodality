@@ -2,6 +2,8 @@
 
 This repository contains the code for the paper.
 
+![Figure 1](imgs/figure1.png)
+
 ## Installation
 ```
 pip install git+https://github.com/alexander-koch/xmodality.git
