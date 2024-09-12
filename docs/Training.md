@@ -2,6 +2,8 @@
 
 ## Data preparation
 
+Download the [TopCoW challenge dataset](https://topcow23.grand-challenge.org/data/) or use a custom dataset.
+
 For training, please create a file named `dataset.txt`
 with similar format, as the example provided.
 The first column is the TOF-MRA path, the second the CTA path.
