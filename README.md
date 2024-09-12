@@ -5,6 +5,10 @@ This repository contains the code for the paper.
 ![Figure 1](imgs/figure1.png)
 
 ## Installation
+
+We used Python 3.9 for the development.
+The code is written in JAX and Flax.
+
 ```
 pip install git+https://github.com/alexander-koch/xmodality.git
 cd xmodality
@@ -13,7 +17,7 @@ pip install -r requirements.txt
 
 ## Download the weights
 
-TODO
+Pre-trained weights will be made available soon.
 
 ## Converting some TOF-MRAs
 
