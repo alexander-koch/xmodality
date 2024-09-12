@@ -41,6 +41,8 @@ python3 train.py --train --arch adm --bfloat16
 You can log to Weights & Biases using the `--wandb` flag.
 Weights can be loaded via the `--load` flag.
 
+See the SLURM scripts in `sh/` for examples.
+
 ## Sampling
 
 To check some samples, run with the `--sample` flag instead of `--train`.

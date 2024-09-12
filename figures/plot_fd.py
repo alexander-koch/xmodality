@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 from tueplots import figsizes, fonts
 
-plt.rcParams.update({"figure.dpi": 200, "axes.linewidth": 0.5})
+plt.rcParams.update({"figure.dpi": 500, "axes.linewidth": 0.5})
 bundle = bundles.icml2022(family="sans-serif", column="half", usetex=False, nrows=2)
 plt.rcParams.update(bundle)
 
@@ -63,4 +63,4 @@ ax.set_ylabel("Fréchet distance")
 #ax.set_ylim(0.75, 2)
 
 plt.legend(loc="upper right")
-plt.savefig("out.png")
+plt.savefig("out.pdf")

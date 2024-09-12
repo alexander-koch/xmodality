@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 from tueplots import figsizes, fonts
 
-plt.rcParams.update({"figure.dpi": 200, "axes.linewidth": 0.5})
+plt.rcParams.update({"figure.dpi": 500, "axes.linewidth": 0.5})
 bundle = bundles.icml2022(family="sans-serif", usetex=False, nrows=3, ncols=2)
 plt.rcParams.update(bundle)
 
@@ -83,4 +83,4 @@ fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.55, 0)
 #plt.legend(loc="upper right")
 #ax.legend(loc='center left', bbox_to_anchor=(1, 1.5))
 
-plt.savefig("out.png")
+plt.savefig("out.pdf")

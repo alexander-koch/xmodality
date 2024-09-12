@@ -45,17 +45,3 @@ For anything evaluation related, you will need to download the ViT-B/16 weights.
 You found a mistake or have an improvement?
 Happy to hear, send us your pull requests or file an issue! 
 
-## Citation
-
-If you use our work, here is the citation (TODO)
-
-```bibtex
-@misc{koch24xmodality,
-    title   = {Cross-modality image synthesis from TOF-MRA to CTA using diffusion-based models}, 
-    author  = {Alexander Koch and Orhun Utku Aydin and Adam Hilbert and Jana Rieger and Satoru Tanioka and Fujimaro Ishida and Dietmar Frey},
-    year    = {2024},
-    eprint  = {TODO},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.CV}
-}
-```
