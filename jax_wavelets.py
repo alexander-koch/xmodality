@@ -1,3 +1,6 @@
+# Taken from https://github.com/crowsonkb/jax-wavelets
+# Modified to use einops instead
+
 """The 2D discrete wavelet transform for JAX."""
 from einops import rearrange
 import jax
