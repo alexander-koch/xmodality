@@ -3,9 +3,9 @@
 ## Data preparation
 
 Download the [TopCoW challenge dataset](https://topcow23.grand-challenge.org/data/) or use a custom dataset.
+Then register the TOF-MRA data to the CTA data.
 
-For training, please create a file named `dataset.txt`
-with similar format, as the example provided.
+For training, please create a file named `dataset.txt` with similar format, as the example provided.
 The first column is the TOF-MRA path, the second the CTA path.
 
 ```csv
@@ -22,7 +22,7 @@ python3 prepare.py
 ```
 
 this will create a directory `data` containing the individual slice pairings.
-Please adjust the script accordingly, to accomodate your data.
+Please adjust the script accordingly, to accomodate your own dataset.
 
 ## Training
 
