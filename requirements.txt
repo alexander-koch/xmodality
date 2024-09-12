@@ -1,0 +1,16 @@
+tqdm
+einops
+jax
+flax
+PyWavelets
+grain
+Pillow
+dm-pix
+matplotlib
+jax-tqdm
+nibabel
+optax
+nilearn
+ml_collections
+seaborn
+tueplots
