@@ -57,7 +57,7 @@ If you use this project, cite us as follows:
 
 ```bibtex
 @misc{koch2024xmodality,
-      title={Cross-modality image synthesis from TOF-MRA to CTA using diffusion-based models}, 
+      title={Cross-modality image synthesis from {TOF-MRA} to {CTA} using diffusion-based models}, 
       author={Alexander Koch and Orhun Utku Aydin and Adam Hilbert and Jana Rieger and Satoru Tanioka and Fujimaro Ishida and Dietmar Frey},
       year={2024},
       eprint={2409.10089},
