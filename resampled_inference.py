@@ -62,7 +62,7 @@ if __name__ == "__main__":
     p.add_argument("--load", type=str, help="path to load pretrained weights from", required=True)
     p.add_argument("--bfloat16", action="store_true", help="use bfloat16 precision")
     p.add_argument("--input", type=str, help="path to image or list of images", required=True)
-    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit", "test"], help="architecture", required=True)
+    p.add_argument("--arch", type=str, choices=["unet", "adm", "uvit", "dit"], help="architecture", required=True)
     p.add_argument("--disable_diffusion", action="store_true", help="disable diffusion")
     p.add_argument("--batch_size", type=int, default=64, help="how many slices to process in parallel")
     p.add_argument("--output", type=str, help="output path", default="out.nii.gz")

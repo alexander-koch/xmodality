@@ -46,6 +46,12 @@ For Mac users, you can run the Diffusion Transformer model locally like this:
 python3 mlx_inference.py --input <path/to/tof> --output <path/to/cta> --load <path/to/weights/ --num_sample_steps <num_sample_steps>
 ```
 
+All scripts print more detailed information on possible settings and parameters by using the `--help` flag, i.e.
+
+```bash
+python3 resampled_inference.py --help
+```
+
 ## Training and Evaluation
 
 See [Training](docs/Training.md) for more information on how to train your model.
@@ -57,8 +63,8 @@ Inference speed on a 512x512x160 TOF-MRA image using a batch size of 64, float32
 
 | Device       | Time   |
 |--------------|--------|
-| Apple M3 Pro | ~17min |
 | NVIDIA A40   |  ~2min |
+| Apple M3 Pro | ~17min |
 
 ## Organization
 
