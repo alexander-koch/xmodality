@@ -3,12 +3,6 @@
 Performs TOF2CTA inference using Apple MLX on diffusion transformer model DiT-L/16
 """
 
-# Contained in a single script, no dependencies
-# 100 sample steps, 512x512x160, batch size 64, ddpm sampling, float32
-# Mac M3 Pro ~17min
-# NVIDIA A40 ~2min
-# JAX version (with metal plugin) -> might freeze your mac, quite slow
-
 import mlx.core as mx
 from mlx import nn
 import math
@@ -21,12 +15,6 @@ from PIL import Image
 from scipy.ndimage import zoom
 import nibabel as nib
 import argparse
-
-def save_image(img, path: str) -> None:
-    """Assumes image in [0,1] range"""
-    img = np.array(mx.clip(img * 255 + 0.5, 0, 255)).astype(np.uint8)
-    img = Image.fromarray(img)
-    img.save(path)
 
 def pair(x: Union[int, tuple[int, int]]) -> tuple[int, int]:
     return x if isinstance(x, tuple) else (x, x)
@@ -353,13 +341,59 @@ def generate(
     out = np.pad(out, ((0,0),(0,0),(lshift,rshift)),constant_values=-50)
     return out
 
-def main(args):
-    hidden_size = 1024
-    dit = DiT(image_size=256, patch_size=16, hidden_size=hidden_size, depth=24, num_heads=16)
+def load_from_safetensors(dit, path):
+    from safetensors import safe_open
+    params = {}
+    with safe_open(path, framework="numpy", device="cpu") as f:
+        for key in f.keys():
+            params[key] = f.get_tensor(key)
 
+    hidden_size = dit.hidden_size
+    dit.ln_0.weight = mx.array(params["LayerNorm_0/scale"])
+    dit.ln_0.bias = mx.array(params["LayerNorm_0/bias"])
+    dit.ln_1.weight = mx.array(params["LayerNorm_1/scale"])
+    dit.ln_1.bias = mx.array(params["LayerNorm_1/bias"])
+
+    dit.dense_0.weight = mx.array(params["Dense_0/kernel"]).T
+    dit.dense_0.bias = mx.array(params["Dense_0/bias"])
+    dit.time_proj.layers[0].weight = mx.array(params["Dense_1/kernel"]).T
+    dit.time_proj.layers[0].bias = mx.array(params["Dense_1/bias"])
+    dit.time_proj.layers[2].weight = mx.array(params["Dense_2/kernel"]).T
+    dit.time_proj.layers[2].bias = mx.array(params["Dense_2/bias"])
+
+    for i, block in enumerate(dit.blocks):
+        block.adaln.layers[1].weight = mx.array(params["DiTBlock_{}/Dense_0/kernel".format(i)]).T
+        block.adaln.layers[1].bias = mx.array(params["DiTBlock_{}/Dense_0/bias".format(i)])
+
+        block.rmsnorm_0.weight = mx.array(params["DiTBlock_{}/RMSNorm_0/scale".format(i)])
+        block.rmsnorm_1.weight = mx.array(params["DiTBlock_{}/RMSNorm_1/scale".format(i)])
+
+        block.mha.query.weight = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/query/kernel".format(i)]).reshape(-1, hidden_size).T
+        block.mha.query.bias = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/query/bias".format(i)]).reshape(hidden_size)
+        block.mha.key.weight = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/key/kernel".format(i)]).reshape(-1, hidden_size).T
+        block.mha.key.bias = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/key/bias".format(i)]).reshape(hidden_size)
+        block.mha.value.weight = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/value/kernel".format(i)]).reshape(-1, hidden_size).T
+        block.mha.value.bias = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/value/bias".format(i)]).reshape(hidden_size)
+        block.mha.to_out.weight = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/out/kernel".format(i)]).reshape(-1, hidden_size).T
+        block.mha.to_out.bias = mx.array(params["DiTBlock_{}/MultiHeadDotProductAttention_0/out/bias".format(i)]).reshape(hidden_size)
+
+        block.swiglu.gate.weight = mx.array(params["DiTBlock_{}/SwiGLU_0/Dense_0/kernel".format(i)]).T
+        block.swiglu.gate.bias = mx.array(params["DiTBlock_{}/SwiGLU_0/Dense_0/bias".format(i)])
+        block.swiglu.dense_0.weight = mx.array(params["DiTBlock_{}/SwiGLU_0/Dense_1/kernel".format(i)]).T
+        block.swiglu.dense_0.bias = mx.array(params["DiTBlock_{}/SwiGLU_0/Dense_1/bias".format(i)])
+        block.swiglu.dense_1.weight = mx.array(params["DiTBlock_{}/SwiGLU_0/Dense_2/kernel".format(i)]).T
+        block.swiglu.dense_1.bias = mx.array(params["DiTBlock_{}/SwiGLU_0/Dense_2/bias".format(i)])
+
+    dit.final_layer.adaln.layers[1].weight = mx.array(params["FinalLayer_0/Dense_0/kernel".format(i)]).T
+    dit.final_layer.adaln.layers[1].bias = mx.array(params["FinalLayer_0/Dense_0/bias".format(i)])
+    dit.final_layer.rmsnorm_0.weight = mx.array(params["FinalLayer_0/RMSNorm_0/scale".format(i)])
+    dit.final_layer.dense_0.weight = mx.array(params["FinalLayer_0/Dense_1/kernel".format(i)]).T
+    dit.final_layer.dense_0.bias = mx.array(params["FinalLayer_0/Dense_1/bias".format(i)])
+
+def load_from_hdf5(dit, path):
     # Weights converted from pickle to hdf5
-    with h5py.File(args.load, "r") as f:
-
+    hidden_size = dit.hidden_size
+    with h5py.File(path, "r") as f:
         dit.ln_0.weight = mx.array(f["LayerNorm_0/scale"][:])
         dit.ln_0.bias = mx.array(f["LayerNorm_0/bias"][:])
         dit.ln_1.weight = mx.array(f["LayerNorm_1/scale"][:])
@@ -400,6 +434,16 @@ def main(args):
         dit.final_layer.rmsnorm_0.weight = mx.array(f["FinalLayer_0/RMSNorm_0/scale".format(i)][:])
         dit.final_layer.dense_0.weight = mx.array(f["FinalLayer_0/Dense_1/kernel".format(i)][:]).T
         dit.final_layer.dense_0.bias = mx.array(f["FinalLayer_0/Dense_1/bias".format(i)][:])
+
+def main(args):
+    hidden_size = 1024
+    dit = DiT(image_size=256, patch_size=16, hidden_size=hidden_size, depth=24, num_heads=16)
+    if args.load.endswith(".safetensors"):
+        load_from_safetensors(dit, args.load)
+    elif args.load.endswith(".hdf5") or args.load.endswith(".h5"):
+        load_from_hdf5(dit, args.load)
+    else:
+        raise ValueError("unsupported weights file")
 
     #nn.quantize(dit, class_predicate=lambda _, m: isinstance(m, nn.Linear), group_size=128, bits=8)
 

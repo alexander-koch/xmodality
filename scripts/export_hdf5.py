@@ -5,9 +5,11 @@ import pickle
 import numpy as np
 import h5py
 import sys
+import jax
 
 with open(sys.argv[1], "rb") as f:
     state = pickle.load(f)
+params = state.params["params"]
 
 with h5py.File(sys.argv[2], "w") as f:
     for k,v in jax.tree_util.tree_leaves_with_path(params):
