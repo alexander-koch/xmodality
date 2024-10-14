@@ -31,11 +31,13 @@ Pre-trained weights will be made available soon.
 
 You can either use `inference.py` or `resampled_inference.py`.
 Resampling additionally resamples to be in 256x256 range during generation.
-Use it like so:
+Use it like this:
 
 ```bash
 python3 resampled_inference.py --input <path/to/tof> --output <path/to/cta> --load weights/uvit.pkl --arch uvit --bfloat16
 ```
+
+or run the model on full resolution like this:
 
 ```bash
 python3 inference.py --input <path/to/tof> --output <path/to/cta> --load weights/uvit.pkl --arch uvit --bfloat16
