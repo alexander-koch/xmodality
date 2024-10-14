@@ -1,6 +1,7 @@
 # Cross-modality image synthesis from TOF-MRA to CTA
 
-This repository contains the code for the paper.
+This repository contains the code for the [paper](https://arxiv.org/abs/2409.10089).
+We explore diffusion-based image-to-image translation models to generate synthetic CTA images from TOF-MRA input.
 
 ![Figure 1](imgs/figure1.png)
 
@@ -8,7 +9,6 @@ This repository contains the code for the paper.
 
 We use Python 3.9 for the development.
 The code is written in [JAX](https://jax.readthedocs.io/en/latest/) and [Flax](https://flax.readthedocs.io/en/latest/).
-You can run the Diffusion Transformer locally on your Mac via [Apple MLX](https://github.com/ml-explore/mlx).
 
 ```bash
 pip install git+https://github.com/alexander-koch/xmodality.git
@@ -16,6 +16,7 @@ cd xmodality
 pip install -r requirements.txt
 ```
 
+You can run the Diffusion Transformer locally on your Mac via [Apple MLX](https://github.com/ml-explore/mlx).
 For MLX support, you need an M series chip (Apple silicon) and macOS >= 13.5.
 
 ```bash
@@ -43,7 +44,7 @@ python3 inference.py --input <path/to/tof> --output <path/to/cta> --load weights
 For Mac users, you can run the Diffusion Transformer model locally like this:
 
 ```bash
-python3 mlx_inference.py --input <path/to/tof> --output <path/to/cta> --load <path/to/weights/ --num_sample_steps <num_sample_steps>
+python3 mlx_inference.py --input <path/to/tof> --output <path/to/cta> --load <path/to/weights> --num_sample_steps <num_sample_steps>
 ```
 
 All scripts print more detailed information on possible settings and parameters by using the `--help` flag, i.e.
@@ -59,12 +60,12 @@ See [Evaluation](docs/Evaluation.md) for more information on how to evaluate a m
 
 ## Speed
 
-Inference speed on a 512x512x160 TOF-MRA image using a batch size of 64, float32 precision, DDPM sampling, 100 sample steps using resampled inference
+Inference speed on a 512x512x160 TOF-MRA image using a batch size of 64, float32 precision, DDPM sampling, using the resampled inference script
 
-| Device       | Time   |
-|--------------|--------|
-| NVIDIA A40   |  ~2min |
-| Apple M3 Pro | ~17min |
+| Device       | Time (4 steps) | Time (32 steps)   | Time (100 steps)  |
+|--------------|----------------|-------------------|-------------------|
+| NVIDIA A40   | ~15s           | ~50s              |  ~2min            |
+| Apple M3 Pro | ~40s           | ~6min             | ~17min            |
 
 ## Organization
 
