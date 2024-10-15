@@ -11,7 +11,7 @@ We use Python 3.9 for the development.
 The code is written in [JAX](https://jax.readthedocs.io/en/latest/) and [Flax](https://flax.readthedocs.io/en/latest/).
 
 ```bash
-pip install git+https://github.com/alexander-koch/xmodality.git
+git clone https://github.com/alexander-koch/xmodality.git
 cd xmodality
 pip install -r requirements.txt
 ```
