@@ -20,20 +20,19 @@ import nibabel as nib
 import argparse
 import functools
 from external_validation import generate
+import utils
 
 def main(args):
     print(args)
 
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     module = get_model(args.arch, dtype=dtype)
-    assert args.load.endswith(".pkl")
-    with open(args.load, "rb") as f:
-        state = pickle.load(f)
+    params = utils.load_params(args.load)
 
     generator = functools.partial(
         generate,
         module=module,
-        params=state.params,
+        params=params,
         batch_size=args.batch_size,
         seed=args.seed,
         use_diffusion=not args.disable_diffusion,

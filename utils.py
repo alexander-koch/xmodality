@@ -5,7 +5,8 @@ from PIL import Image
 from typing import Iterable, Any, Callable, Union
 import dm_pix as pix
 from fd import calculate_frechet_distance
-
+from safetensors import safe_open
+import pickle
 
 class Evaluator:
     stats: list[Any] = []
@@ -104,3 +105,29 @@ def save_image(img: jax.Array, path: str) -> None:
     img = np.array(jnp.clip(img * 255 + 0.5, 0, 255)).astype(np.uint8)
     img = Image.fromarray(img)
     img.save(path)
+
+def load_safetensors(path):
+    params = {}
+    with safe_open(path, framework="numpy", device="cpu") as f:
+        for key in f.keys():
+            tensor = f.get_tensor(key)
+            subkeys = key.split("/")
+
+            item = params
+            for key in subkeys[:-1]:
+                if key not in item:
+                    item[key] = {}
+                item = item[key]
+            item[subkeys[-1]] = tensor
+    return {"params": params}
+
+def load_params(path):
+    if path.endswith(".pkl"):
+        # Assuming pickle has full TrainingState
+        with open(path, "rb") as f:
+            return pickle.load(f).params
+    elif path.endswith(".safetensors"):
+        return load_safetensors(path)
+    else:
+        raise NotImplementedError
+

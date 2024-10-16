@@ -21,21 +21,19 @@ from external_validation import strip, vmap_transform
 from sampling import get_sampler, get_sampler_names
 import functools
 import chex
+import utils
 
 def main(args):
     dtype = jnp.bfloat16 if args.bfloat16 else jnp.float32
     module = get_model(args.arch, dtype=dtype)
-    assert args.load.endswith(".pkl")
     print(args)
-
-    with open(args.load, "rb") as f:
-        state = pickle.load(f)
+    params = utils.load_params(args.load)
 
     factor = 16 if args.arch == "dit" else 8
     generator = functools.partial(
         generate,
         module=module,
-        params=state.params,
+        params=params,
         batch_size=args.batch_size,
         seed=args.seed,
         use_diffusion=not args.disable_diffusion,

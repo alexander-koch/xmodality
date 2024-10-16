@@ -173,8 +173,20 @@ def main(args):
 
     # Setup state
     if args.load is not None:
-        with open(args.load, "rb") as f:
-            state = pickle.load(f)
+        if args.load.endswith(".pkl"):
+            with open(args.load, "rb") as f:
+                state = pickle.load(f)
+        elif args.load.endswith(".safetensors"):
+            params = utils.load_safetensors(args.load)
+            state = TrainingState(
+                params=params,
+                opt_state=None,
+                train_loss=None,
+                ema_params=None,
+                step=0)
+        else:
+            raise NotImplementedError
+
         print("train loss:", state.train_loss)
         print("steps:", state.step)
     else:
