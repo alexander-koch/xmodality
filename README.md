@@ -1,13 +1,16 @@
 # Cross-modality image synthesis from TOF-MRA to CTA
 
-This repository contains the code for the [paper](https://arxiv.org/abs/2409.10089).
+[![arXiv](https://img.shields.io/badge/arXiv-2409.10089-b31b1b.svg)](https://arxiv.org/abs/2409.10089)
+[![DOI](https://img.shields.io/badge/DOI-10.1016/j.media.2025.103722-blue.svg)](https://doi.org/10.1016/j.media.2025.103722)
+
+This repository contains the code for the [paper](https://doi.org/10.1016/j.media.2025.103722).
 We explore diffusion-based image-to-image translation models to generate synthetic CTA images from TOF-MRA input.
 
 ![Figure 1](imgs/figure1.png)
 
 ## Installation
 
-We use Python 3.9 for the development.
+We use Python 3.9 for development.
 The code is written in [JAX](https://jax.readthedocs.io/en/latest/) and [Flax](https://flax.readthedocs.io/en/latest/).
 
 ```bash
@@ -17,7 +20,7 @@ pip install -r requirements.txt
 ```
 
 You can run the Diffusion Transformer locally on your Mac via [Apple MLX](https://github.com/ml-explore/mlx).
-For MLX support, you need an M series chip (Apple silicon) and macOS >= 13.5.
+For MLX support, you need an M-series chip (Apple Silicon) and macOS >= 13.5.
 
 ```bash
 pip install mlx
@@ -30,7 +33,7 @@ Pre-trained weights will be made available soon.
 ## Converting some TOF-MRAs
 
 You can either use `inference.py` or `resampled_inference.py`.
-Resampling additionally resamples to be in 256x256 range during generation.
+Resampling additionally resamples to fit within the 256x256 range during generation.
 Use it like this:
 
 ```bash
@@ -79,7 +82,7 @@ Inference speed on a 512x512x160 TOF-MRA image using a batch size of 64, float32
 * `compute_fd.py` - Computes the Frechet Distance on ViT
 * `external_validation.py` - Computes 3D metrics on internal and external dataset
 
-For anything evaluation related, you will need to download the ViT-B/16 weights.
+For any evaluation-related tasks, you will need to download the ViT-B/16 weights.
 
 ## Contributing
 
@@ -88,17 +91,19 @@ Happy to hear, send us your pull requests or file an issue!
 
 ## Citation
 
-If you use this project, cite us as follows:
+If you use this project, please cite our Medical Image Analysis article:
 
 ```bibtex
-@misc{koch2024xmodality,
-      title={Cross-modality image synthesis from {TOF-MRA} to {CTA} using diffusion-based models}, 
-      author={Alexander Koch and Orhun Utku Aydin and Adam Hilbert and Jana Rieger and Satoru Tanioka and Fujimaro Ishida and Dietmar Frey},
-      year={2024},
-      eprint={2409.10089},
-      archivePrefix={arXiv},
-      primaryClass={eess.IV},
-      url={https://arxiv.org/abs/2409.10089}, 
+@article{koch2025-xmodality,
+    title = {Cross-modality image synthesis from {TOF-MRA} to {CTA} using diffusion-based models},
+    journal = {Medical Image Analysis},
+    volume = {105},
+    pages = {103722},
+    year = {2025},
+    issn = {1361-8415},
+    doi = {https://doi.org/10.1016/j.media.2025.103722},
+    url = {https://www.sciencedirect.com/science/article/pii/S1361841525002695},
+    author = {Alexander Koch and Orhun Utku Aydin and Adam Hilbert and Jana Rieger and Satoru Tanioka and Fujimaro Ishida and Dietmar Frey},
+    keywords = {Diffusion, Image-to-image translation, Angiography imaging},
 }
 ```
-
