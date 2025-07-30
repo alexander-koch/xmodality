@@ -28,7 +28,28 @@ pip install mlx
 
 ## Download the weights
 
-Pre-trained weights will be made available soon.
+Pre-trained weights are available on Hugging Face [xmodality](https://huggingface.co/alexander-koch/xmodality).
+You can download them via wget like this:
+
+```bash
+wget https://huggingface.co/alexander-koch/xmodality/resolve/main/dit.safetensors
+```
+
+To verfiy, here are the md5sums:
+
+```bash
+$ md5sum unet.safetensors
+f0c09e5c91b7a8451b0879a5ef55902f  unet.safetensors
+
+$ md5sum adm.safetensors
+8603c2805aad4e98420824bd9cb6795a  adm.safetensors
+
+$ md5sum uvit.safetensors
+md6ed96a0f83e1ffa213e8f37ff82ac496e  uvit.safetensors
+
+$ md5sum dit.safetensors
+af495d740288c2870e4c0a3bbb1ee84c  dit.safetensors
+```
 
 ## Converting some TOF-MRAs
 
