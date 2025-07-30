@@ -110,6 +110,14 @@ For any evaluation-related tasks, you will need to download the ViT-B/16 weights
 You found a mistake or have an improvement?
 Happy to hear, send us your pull requests or file an issue! 
 
+## Acknowledgments
+
+This codebase borrows parts from 
+
+* https://github.com/lucidrains/denoising-diffusion-pytorch/
+* https://github.com/crowsonkb/jax-wavelets
+* https://github.com/facebookresearch/DiT
+
 ## Citation
 
 If you use this project, please cite our Medical Image Analysis article:
