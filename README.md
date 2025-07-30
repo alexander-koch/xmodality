@@ -35,7 +35,7 @@ You can download them via wget like this:
 wget https://huggingface.co/alexander-koch/xmodality/resolve/main/dit.safetensors
 ```
 
-To verfiy, here are the md5sums:
+To verify, here are the md5sums:
 
 ```bash
 $ md5sum unet.safetensors
